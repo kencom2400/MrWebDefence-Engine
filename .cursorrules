@@ -1,0 +1,6 @@
+# Cursor Rules
+# Test deployment from RepoAdmin (Second Test)
+
+This is a second test deployment to verify the PR creation fix.
+
+@include .cursor/rules/test-rule.md
