@@ -1,0 +1,4 @@
+# Cursor Rules
+# Test deployment from RepoAdmin
+
+@include .cursor/rules/test-rule.md
