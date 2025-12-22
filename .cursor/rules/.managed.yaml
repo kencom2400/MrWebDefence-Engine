@@ -1,5 +1,5 @@
 managed:
-  - project: repo-admin
+  - project: MrWebDefence
     language: shell
 
 
