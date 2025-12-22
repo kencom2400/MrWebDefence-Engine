@@ -1,0 +1,14 @@
+# Cursor Rules
+#
+# This file is auto-generated. Do not edit manually.
+#
+
+# Shared rules from cursorrules/
+@include .cursor/rules/02-task-start.md
+@include .cursor/rules/03-implementation.md
+@include .cursor/rules/03-issue-reporting.md
+@include .cursor/rules/05-pr-review.md
+@include .cursor/rules/README.md
+@include .cursor/rules/issue-report.md
+@include .cursor/rules/pr-description.md
+
