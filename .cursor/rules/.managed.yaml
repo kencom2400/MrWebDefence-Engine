@@ -1,0 +1,5 @@
+managed:
+  - project: repo-admin
+    language: shell
+
+
