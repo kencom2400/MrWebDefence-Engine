@@ -1,0 +1,53 @@
+#!/bin/bash
+
+# GitHub Projects設定ファイル
+# このファイルはGitHub操作スクリプト全般から参照されます
+
+# リポジトリ情報
+readonly REPO_OWNER="kencom2400"
+readonly REPO_NAME="MrWebDefence-Engine"
+readonly REPO="$kencom2400/$MrWebDefence-Engine"  # リポジトリの完全な形式（owner/repo）
+readonly OWNER="$kencom2400"  # 後方互換性のためのエイリアス
+export REPO_OWNER REPO_NAME REPO OWNER
+
+# プロジェクト情報
+readonly PROJECT_NUMBER={PROJECT_NUMBER}
+readonly PROJECT_ID="{PROJECT_ID}"
+readonly PROJECT_OWNER="$kencom2400"  # プロジェクトのオーナー（通常はリポジトリオーナーと同じ）
+export PROJECT_NUMBER PROJECT_ID PROJECT_OWNER
+
+# GitHub API設定
+readonly GH_API_LIMIT={GH_API_LIMIT}
+readonly MIN_ISSUE_COUNT_FOR_COMPLETION={MIN_ISSUE_COUNT_FOR_COMPLETION}
+export GH_API_LIMIT MIN_ISSUE_COUNT_FOR_COMPLETION
+
+# リトライ処理の設定
+readonly MAX_RETRIES={MAX_RETRIES}
+readonly RETRY_INTERVAL={RETRY_INTERVAL}
+export MAX_RETRIES RETRY_INTERVAL
+
+# API Rate Limit対策
+readonly API_RATE_LIMIT_WAIT={API_RATE_LIMIT_WAIT}
+export API_RATE_LIMIT_WAIT
+
+# ステータスフィールドID
+readonly STATUS_FIELD_ID="{STATUS_FIELD_ID}"
+export STATUS_FIELD_ID
+
+# ステータスオプションID
+readonly EPIC_OPTION_ID="{EPIC_OPTION_ID}"
+readonly BACKLOG_OPTION_ID="{BACKLOG_OPTION_ID}"
+readonly TODO_OPTION_ID="{TODO_OPTION_ID}"
+readonly IN_PROGRESS_OPTION_ID="{IN_PROGRESS_OPTION_ID}"
+readonly REVIEW_OPTION_ID="{REVIEW_OPTION_ID}"
+readonly DONE_OPTION_ID="{DONE_OPTION_ID}"
+export EPIC_OPTION_ID BACKLOG_OPTION_ID TODO_OPTION_ID IN_PROGRESS_OPTION_ID REVIEW_OPTION_ID DONE_OPTION_ID
+
+# ステータス名の定義（絵文字なし）
+readonly STATUS_EPIC="{STATUS_EPIC}"
+readonly STATUS_BACKLOG="{STATUS_BACKLOG}"
+readonly STATUS_TODO="{STATUS_TODO}"
+readonly STATUS_IN_PROGRESS="{STATUS_IN_PROGRESS}"
+readonly STATUS_REVIEW="{STATUS_REVIEW}"
+readonly STATUS_DONE="{STATUS_DONE}"
+export STATUS_EPIC STATUS_BACKLOG STATUS_TODO STATUS_IN_PROGRESS STATUS_REVIEW STATUS_DONE
