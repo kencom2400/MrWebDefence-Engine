@@ -13,11 +13,17 @@
 @include .cursor/rules/templates/pr-description.md
 
 # Repository-specific rules
+@include .cursor/rules/00-workflow-checklist.d/02-task-start.md
+@include .cursor/rules/00-workflow-checklist.d/03-implementation.md
+@include .cursor/rules/00-workflow-checklist.d/05-pr-review.md
 @include .cursor/rules/02-task-start.md
 @include .cursor/rules/03-implementation.md
 @include .cursor/rules/03-issue-reporting.md
+@include .cursor/rules/04-github-integration.d/03-issue-reporting.md
 @include .cursor/rules/05-pr-review.md
 @include .cursor/rules/README.md
 @include .cursor/rules/issue-report.md
 @include .cursor/rules/pr-description.md
+@include .cursor/rules/templates/issue-report.md
+@include .cursor/rules/templates/pr-description.md
 
