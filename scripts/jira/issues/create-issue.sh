@@ -207,7 +207,7 @@ ISSUE_TYPE_ID=$(get_issue_type_id_from_api "$PROJECT_KEY" "$ISSUE_TYPE" 2>&1) ||
   echo "プロジェクト '$PROJECT_KEY' で利用可能なIssue種別を確認してください。" >&2
   echo "" >&2
   echo "利用可能なIssue種別を取得中..." >&2
-  "${JIRA_SCRIPT_DIR}/get-issue-types.sh" "$PROJECT_KEY" >&2
+  "${JIRA_SCRIPT_DIR}/issues/get-issue-types.sh" "$PROJECT_KEY" >&2
   exit 1
 }
 
@@ -216,7 +216,7 @@ if [ -z "$ISSUE_TYPE_ID" ]; then
   echo "プロジェクト '$PROJECT_KEY' で利用可能なIssue種別を確認してください。" >&2
   echo "" >&2
   echo "利用可能なIssue種別を取得中..." >&2
-  "${JIRA_SCRIPT_DIR}/get-issue-types.sh" "$PROJECT_KEY" >&2
+  "${JIRA_SCRIPT_DIR}/issues/get-issue-types.sh" "$PROJECT_KEY" >&2
   exit 1
 fi
 
@@ -296,7 +296,7 @@ if [ $? -eq 0 ] && echo "$RESPONSE" | jq -e . >/dev/null 2>&1; then
       echo "🔄 ステータスを '$STATUS' に遷移中..."
       # ステータス名をマッピング（英語名 → 日本語名）
       MAPPED_STATUS=$(map_status_name "$STATUS" "$ISSUE_KEY")
-      "${JIRA_SCRIPT_DIR}/transition-issue.sh" "$ISSUE_KEY" "$MAPPED_STATUS" >/dev/null 2>&1
+      "${JIRA_SCRIPT_DIR}/projects/transition-issue.sh" "$ISSUE_KEY" "$MAPPED_STATUS" >/dev/null 2>&1
       if [ $? -eq 0 ]; then
         echo "✅ ステータスを '$MAPPED_STATUS' に変更しました"
       else
