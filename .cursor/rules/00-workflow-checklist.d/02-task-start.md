@@ -6,11 +6,17 @@
 
 **実行内容:**
 
-- [ ] GitHub Projectsから「📝 To Do」ステータスのIssueを取得
-- [ ] 優先度順にソート（priority: critical > high > medium > low）
+- [ ] Issueトラッカーから「To Do」ステータスのIssueを取得
+  - GitHub Projects: 「📝 To Do」ステータス
+  - Jira: 「To Do」ステータス
+- [ ] 優先度順にソート
+  - GitHub: priority: critical > high > medium > low
+  - Jira: Critical > High > Medium > Low
 - [ ] 最優先Issueを自動選択
 - [ ] **🚨 CRITICAL: 必ずフィーチャーブランチを作成**（`feat/XXX-description` または `fix/XXX-description`）
-- [ ] ステータスを「🚧 In Progress」に変更
+- [ ] ステータスを「In Progress」に変更
+  - GitHub Projects: 「🚧 In Progress」
+  - Jira: 「In Progress」（日本語: 「進行中」）
 
 **🔴 絶対禁止事項:**
 
@@ -20,14 +26,17 @@
 
 **参照ルール:**
 
-- **`.cursor/rules/04-github-integration.d/02-status-management.md`** - Issue取得・ステータス管理
+- **`.cursor/rules/04-github-integration.d/02-status-management.md`** - Issue取得・ステータス管理（GitHub）
+- **`.cursor/rules/04-github-integration.d/05-jira-integration.md`** - Jira統合（Jira）
 - **`.cursor/rules/03-git-workflow.d/01-branch-management.md`** - ブランチ作成
 
 **重要事項:**
 
 - ✅ 質問・確認なしで即座に実行
 - ✅ **必ずフィーチャーブランチを作成してから作業開始**
-- ✅ GitHub ProjectsのステータスをIn Progressに変更
+- ✅ IssueトラッカーのステータスをIn Progressに変更
+  - GitHub Projects: `./scripts/github/workflow/start-task.sh`
+  - Jira: `./scripts/jira/workflow/start-task.sh`
 - ✅ 各IssueのAssignee情報を確認し、自分にアサインされているものをフィルタリング
 
 ---
