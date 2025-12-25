@@ -9,7 +9,7 @@ export ISSUE_TRACKER
 
 # Jira設定
 readonly JIRA_PROJECT_KEY="MWD"
-readonly JIRA_BASE_URL="{JIRA_BASE_URL:-https://kencom2400.atlassian.net}"
+readonly JIRA_BASE_URL="https://kencom2400.atlassian.net"
 export JIRA_PROJECT_KEY JIRA_BASE_URL
 
 # 認証情報（環境変数またはconfig.local.shから取得）
