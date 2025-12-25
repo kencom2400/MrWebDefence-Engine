@@ -3,6 +3,12 @@
 # Jira設定ファイル
 # このファイルはJira操作スクリプト全般から参照されます
 
+# ローカル設定ファイルの読み込み（存在する場合）
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "${SCRIPT_DIR}/config.local.sh" ]; then
+  source "${SCRIPT_DIR}/config.local.sh"
+fi
+
 # Issueトラッカー設定
 readonly ISSUE_TRACKER="jira"
 export ISSUE_TRACKER
