@@ -8,17 +8,25 @@
 # 引数なし: Jiraから「To Do」ステータスの最優先Issueを自動選択
 # 引数あり: 指定したIssueキーで作業を開始
 
-set -e
-
-# 設定ファイルの読み込み
+# 設定ファイルの読み込み（set -eの前に実行）
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "${SCRIPT_DIR}/../../jira/config.sh" ]; then
-  source "${SCRIPT_DIR}/../../jira/config.sh"
+JIRA_SCRIPT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+if [ -f "${JIRA_SCRIPT_DIR}/config.sh" ]; then
+  source "${JIRA_SCRIPT_DIR}/config.sh" 2>/dev/null || true
 fi
 
+# エラーハンドリング
+trap 'echo "❌ エラー: スクリプトが異常終了しました (行: $LINENO)" >&2; exit 1' ERR
+
+set -e
+
 # 共通関数の読み込み
-if [ -f "${SCRIPT_DIR}/../../jira/common.sh" ]; then
-  source "${SCRIPT_DIR}/../../jira/common.sh"
+if [ -f "${JIRA_SCRIPT_DIR}/common.sh" ]; then
+  source "${JIRA_SCRIPT_DIR}/common.sh"
+else
+  echo "❌ エラー: ${JIRA_SCRIPT_DIR}/common.sh が見つかりません" >&2
+  exit 1
 fi
 
 # 使い方表示
@@ -157,8 +165,6 @@ start_task_by_key() {
   git pull origin main > /dev/null 2>&1 || true
   
   # ブランチ名を生成（kebab-case）
-  # Issueキー（例：MWD-123）から番号部分を抽出
-  ISSUE_NUM=$(echo "$ISSUE_KEY" | sed 's/.*-//')
   # 英数字以外の文字はすべてハイフンに置き換え、先頭と末尾のハイフンを削除
   BRANCH_NAME="feature/${ISSUE_KEY}-$(echo "$TITLE" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-+|-+$//g' | cut -c1-60)"
   
@@ -201,9 +207,16 @@ select_priority_issue() {
   echo ""
   
   # 現在のユーザーを取得
-  CURRENT_USER_INFO=$(jira_api_call "GET" "myself" 2>/dev/null)
-  if [ $? -ne 0 ]; then
+  set +e
+  CURRENT_USER_INFO=$(jira_api_call "GET" "myself" 2>&1)
+  local api_exit_code=$?
+  set -e
+  
+  if [ $api_exit_code -ne 0 ] || [ -z "$CURRENT_USER_INFO" ] || ! echo "$CURRENT_USER_INFO" | jq -e . > /dev/null 2>&1; then
     echo "❌ エラー: ユーザー情報の取得に失敗しました" >&2
+    if [ -n "$CURRENT_USER_INFO" ]; then
+      echo "   詳細: ${CURRENT_USER_INFO}" >&2
+    fi
     exit 1
   fi
   CURRENT_USER_ID=$(echo "$CURRENT_USER_INFO" | jq -r '.accountId')
@@ -211,12 +224,24 @@ select_priority_issue() {
   # 「To Do」ステータスで自分にアサインされているIssueを取得
   # JQL: project = PROJECT_KEY AND status = "To Do" AND assignee = currentUser() ORDER BY priority DESC, created ASC
   JQL="project = ${PROJECT_KEY} AND status = \"To Do\" AND assignee = currentUser() ORDER BY priority DESC, created ASC"
-  JQL_ENCODED=$(echo "$JQL" | jq -sRr @uri)
+  JQL_DATA=$(jq -n \
+    --arg jql "$JQL" \
+    '{
+      jql: $jql,
+      maxResults: 50,
+      fields: ["summary", "status", "priority", "assignee"]
+    }')
   
-  TODO_ISSUES=$(jira_api_call "GET" "search?jql=${JQL_ENCODED}&maxResults=50&fields=summary,status,priority,assignee" 2>/dev/null)
+  set +e
+  TODO_ISSUES=$(jira_api_call "POST" "search/jql" "$JQL_DATA" 2>&1)
+  local search_exit_code=$?
+  set -e
   
-  if [ $? -ne 0 ] || ! echo "$TODO_ISSUES" | jq -e '.issues | length > 0' > /dev/null 2>&1; then
+  if [ $search_exit_code -ne 0 ] || [ -z "$TODO_ISSUES" ] || ! echo "$TODO_ISSUES" | jq -e '.issues | length > 0' > /dev/null 2>&1; then
     echo "❌ 自分にアサインされた「To Do」ステータスのIssueが見つかりません"
+    if [ -n "$TODO_ISSUES" ]; then
+      echo "   詳細: $(echo "$TODO_ISSUES" | head -c 200)" >&2
+    fi
     exit 1
   fi
   

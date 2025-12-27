@@ -122,18 +122,21 @@ map_status_name() {
   local status_name="$1"
   local issue_key="$2"
   
+  # 入力文字列を小文字に正規化して比較（大文字小文字を区別しない）
+  local normalized_status=$(echo "$status_name" | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]_]//g')
+  
   # 既に日本語名の場合はそのまま返す
-  case "$status_name" in
-    "To Do"|"ToDo"|"TODO")
+  case "$normalized_status" in
+    "todo"|"tod")
       echo "To Do"
       ;;
-    "In Progress"|"InProgress"|"IN_PROGRESS")
+    "inprogress"|"in_progress")
       echo "進行中"
       ;;
-    "Done"|"DONE")
+    "done")
       echo "完了"
       ;;
-    "Backlog"|"BACKLOG")
+    "backlog")
       echo "バックログ"
       ;;
     *)

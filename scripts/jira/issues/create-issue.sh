@@ -35,6 +35,7 @@ show_usage() {
   --issue-type TYPE      チケット種別: Epic, Bug, Story, Task, Sub-task（必須）
   --status STATUS        ステータス: Backlog, ToDo, In Progress, Done
   --project-key KEY      プロジェクトキー（オプション、設定ファイルから取得可能）
+  --parent PARENT_KEY    親タスクのキー（オプション、親がEpicの場合自動紐づけ）
   --help                 このヘルプを表示
 
 例:
@@ -53,6 +54,12 @@ show_usage() {
      --issue-type Story \\
      --status Backlog
 
+  # Epicを親に指定してTaskを作成（自動的にEpicに紐づけ）
+  $0 --title "Task 3.1: ユーザー認証機能実装" \\
+     --issue-type Task \\
+     --parent MWD-3 \\
+     --status ToDo
+
 チケット種別: Epic, Bug, Story, Task, Sub-task
 ステータス: Backlog, ToDo, In Progress, Done
 
@@ -67,6 +74,7 @@ TITLE=""
 BODY=""
 BODY_FILE=""
 STATUS=""
+PARENT_KEY=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -96,6 +104,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --status)
             STATUS="$2"
+            shift 2
+            ;;
+        --parent)
+            PARENT_KEY="$2"
             shift 2
             ;;
         --help)
@@ -191,6 +203,50 @@ if [ -z "$TITLE" ]; then
     show_usage
     exit 1
 fi
+
+# 親タスクがEpicかどうかを判定する関数
+check_parent_is_epic() {
+    local parent_key="$1"
+    
+    if [ -z "$parent_key" ]; then
+        return 1
+    fi
+    
+    # 親タスクの情報を取得
+    PARENT_INFO=$(jira_api_call "GET" "issue/${parent_key}?fields=issuetype")
+    
+    if [ $? -ne 0 ] || ! echo "$PARENT_INFO" | jq -e '.key' >/dev/null 2>&1; then
+        echo "❌ エラー: 親タスク '${parent_key}' の情報取得に失敗しました" >&2
+        return 2
+    fi
+    
+    # IssueTypeを取得
+    PARENT_ISSUE_TYPE=$(echo "$PARENT_INFO" | jq -r '.fields.issuetype.name' 2>/dev/null)
+    
+    # Epicまたはエピックかどうかを確認
+    case "$PARENT_ISSUE_TYPE" in
+        "Epic"|"エピック")
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# IssueTypeがBug, Story, Taskのいずれかかどうかを判定する関数
+is_linkable_issue_type() {
+    local issue_type="$1"
+    
+    case "$issue_type" in
+        "Bug"|"Story"|"Task"|"バグ"|"ストーリー"|"タスク")
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
 
 # 本文の取得
 if [ -n "$BODY_FILE" ]; then
@@ -302,6 +358,29 @@ if [ $? -eq 0 ] && echo "$RESPONSE" | jq -e . >/dev/null 2>&1; then
       else
         echo "⚠️  ステータス遷移に失敗しました（現在のステータス: $CURRENT_STATUS）"
       fi
+    fi
+  fi
+  
+  # 親タスクが指定されている場合、Epicへの自動紐づけを試みる
+  if [ -n "$PARENT_KEY" ]; then
+    echo ""
+    echo "🔄 親タスクの確認中..."
+    
+    # 親タスクがEpicかどうかを確認
+    if check_parent_is_epic "$PARENT_KEY"; then
+      # IssueTypeがBug, Story, Taskかどうかを確認
+      if is_linkable_issue_type "$ISSUE_TYPE"; then
+        echo "🔄 Epicに自動紐づけ中..."
+        "${JIRA_SCRIPT_DIR}/issues/link-task-to-epic.sh" "$ISSUE_KEY" "$PARENT_KEY" >/dev/null 2>&1
+        if [ $? -eq 0 ]; then
+          echo "✅ Epic '$PARENT_KEY' に紐づけました"
+        else
+          echo "⚠️  Epicへの紐づけに失敗しました（手動で紐づけてください）"
+        fi
+      fi
+    else
+      # 親タスクがEpicでない場合は何もしない（エラーにはしない）
+      echo "ℹ️  親タスク '$PARENT_KEY' はEpicではないため、自動紐づけをスキップしました"
     fi
   fi
   
