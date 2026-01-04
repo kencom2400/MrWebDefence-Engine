@@ -4,13 +4,35 @@
 #
 
 # Shared rules from cursorrules/
-@include .cursor/rules/00-workflow-checklist.d/02-task-start.md
+@include .cursor/rules/00-workflow-checklist.d/00-WORKFLOW-CHECKLIST.md
 @include .cursor/rules/00-workflow-checklist.d/03-implementation.md
-@include .cursor/rules/00-workflow-checklist.d/05-pr-review.md
+@include .cursor/rules/01-project.d/01-overview.md
+@include .cursor/rules/01-project.d/02-tech-stack.md
+@include .cursor/rules/01-project.d/03-architecture.md
+@include .cursor/rules/02-code-standards.d/00-ADDING-NEW-RULES.md
+@include .cursor/rules/02-code-standards.d/01-02-test-requirements.md
+@include .cursor/rules/02-code-standards.d/01-03-push-check.md
+@include .cursor/rules/02-code-standards.d/02-task-start.md
+@include .cursor/rules/02-code-standards.d/03-04-implementation-checklist.md
+@include .cursor/rules/02-code-standards.d/04-01-gemini-learnings.md
+@include .cursor/rules/03-git-workflow.d/00-overview.md
+@include .cursor/rules/03-git-workflow.d/01-branch-management.md
+@include .cursor/rules/03-git-workflow.d/02-commit-rules.md
+@include .cursor/rules/04-github-integration.d/01-projects-setup.md
 @include .cursor/rules/04-github-integration.d/03-issue-reporting.md
+@include .cursor/rules/04-github-integration.d/04-github-integration.md
+@include .cursor/rules/04-github-integration.d/05-jira-integration_variant1.md
+@include .cursor/rules/04-github-integration.d/05-jira-integration_variant2.md
+@include .cursor/rules/05-ci-cd.d/01-test-scripts.md
+@include .cursor/rules/05-ci-cd.d/02-env-management.md
+@include .cursor/rules/05-ci-cd.d/03-playwright-config.md
+@include .cursor/rules/README_variant1.md
+@include .cursor/rules/README_variant2.md
 @include .cursor/rules/templates/issue-report.md
 @include .cursor/rules/templates/pr-description.md
 
 # Repository-specific rules
+@include .cursor/rules/00-workflow-checklist.d/05-pr-review.md
+@include .cursor/rules/04-github-integration.d/05-jira-integration.md
 @include .cursor/rules/README.md
 
