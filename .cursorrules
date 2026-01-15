@@ -4,36 +4,62 @@
 #
 
 # Shared rules from cursorrules/
-@include .cursor/rules/00-workflow-checklist.d/00-WORKFLOW-CHECKLIST.md
+@include .cursor/rules/00-workflow-checklist.d/00-WORKFLOW-CHECKLIST_variant1.md
+@include .cursor/rules/00-workflow-checklist.d/00-WORKFLOW-CHECKLIST_variant2.md
+@include .cursor/rules/00-workflow-checklist.d/02-task-start_variant1.md
 @include .cursor/rules/00-workflow-checklist.d/03-implementation.md
-@include .cursor/rules/00-workflow-checklist.d/04-push-check.md
+@include .cursor/rules/00-workflow-checklist.d/03-implementation_variant1.md
+@include .cursor/rules/00-workflow-checklist.d/04-push-check_variant1.md
+@include .cursor/rules/00-workflow-checklist.d/04-push-check_variant2.md
+@include .cursor/rules/00-workflow-checklist.d/04-push-check_variant3.md
 @include .cursor/rules/00-workflow-checklist.d/05-pr-review.md
+@include .cursor/rules/00-workflow-checklist.d/05-pr-review_variant1.md
 @include .cursor/rules/01-project.d/01-overview.md
 @include .cursor/rules/01-project.d/02-tech-stack.md
 @include .cursor/rules/01-project.d/03-architecture.md
 @include .cursor/rules/02-code-standards.d/00-ADDING-NEW-RULES.md
-@include .cursor/rules/02-code-standards.d/01-02-test-requirements.md
+@include .cursor/rules/02-code-standards.d/01-02-test-requirements_variant1.md
+@include .cursor/rules/02-code-standards.d/01-02-test-requirements_variant2.md
 @include .cursor/rules/02-code-standards.d/01-03-push-check.md
+@include .cursor/rules/02-code-standards.d/01-03-push-check_variant1.md
 @include .cursor/rules/02-code-standards.d/02-task-start.md
+@include .cursor/rules/02-code-standards.d/02-task-start_variant3.md
 @include .cursor/rules/02-code-standards.d/03-04-implementation-checklist.md
 @include .cursor/rules/02-code-standards.d/03-05-script-tools.md
-@include .cursor/rules/02-code-standards.d/03-06-shell-scripts.md
+@include .cursor/rules/02-code-standards.d/03-06-shell-scripts_variant1.md
+@include .cursor/rules/02-code-standards.d/03-06-shell-scripts_variant2.md
 @include .cursor/rules/02-code-standards.d/04-01-gemini-learnings.md
-@include .cursor/rules/03-git-workflow.d/00-overview.md
+@include .cursor/rules/02-code-standards.d/04-01-gemini-learnings_variant1.md
+@include .cursor/rules/02-code-standards.d/04-01-gemini-learnings_variant3.md
+@include .cursor/rules/03-git-workflow.d/00-overview_variant1.md
 @include .cursor/rules/03-git-workflow.d/01-branch-management.md
-@include .cursor/rules/03-git-workflow.d/02-commit-rules.md
-@include .cursor/rules/03-git-workflow.d/03-push-check.md
+@include .cursor/rules/03-git-workflow.d/02-commit-rules_variant1.md
+@include .cursor/rules/03-git-workflow.d/02-commit-rules_variant2.md
+@include .cursor/rules/03-git-workflow.d/03-push-check_variant1.md
+@include .cursor/rules/03-git-workflow.d/03-push-check_variant2.md
+@include .cursor/rules/04-github-integration.d/00-overview.md
 @include .cursor/rules/04-github-integration.d/01-projects-setup.md
 @include .cursor/rules/04-github-integration.d/02-status-management.md
+@include .cursor/rules/04-github-integration.d/02-status-management_variant1.md
 @include .cursor/rules/04-github-integration.d/03-issue-reporting.md
 @include .cursor/rules/04-github-integration.d/04-start-task.md
-@include .cursor/rules/04-github-integration.d/05-jira-integration.md
+@include .cursor/rules/04-github-integration.d/04-start-task_variant1.md
+@include .cursor/rules/04-github-integration.d/05-jira-integration_variant3.md
 @include .cursor/rules/05-ci-cd.d/01-test-scripts.md
 @include .cursor/rules/05-ci-cd.d/02-env-management.md
 @include .cursor/rules/05-ci-cd.d/03-playwright-config.md
+@include .cursor/rules/05-ci-cd.d/05-jira-integration.md
 @include .cursor/rules/templates/issue-report.md
-@include .cursor/rules/templates/pr-description.md
+@include .cursor/rules/templates/pr-description_variant1.md
+@include .cursor/rules/templates/pr-description_variant2.md
 
 # Repository-specific rules
+@include .cursor/rules/00-workflow-checklist.d/00-WORKFLOW-CHECKLIST.md
+@include .cursor/rules/00-workflow-checklist.d/04-push-check.md
+@include .cursor/rules/02-code-standards.d/01-02-test-requirements.md
+@include .cursor/rules/02-code-standards.d/03-06-shell-scripts.md
+@include .cursor/rules/03-git-workflow.d/02-commit-rules.md
+@include .cursor/rules/03-git-workflow.d/03-push-check.md
 @include .cursor/rules/README.md
+@include .cursor/rules/templates/pr-description.md
 
