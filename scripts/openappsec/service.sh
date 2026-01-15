@@ -55,18 +55,36 @@ start_services() {
     
     if [ -z "$services" ]; then
         # 全サービスを起動
-        if $DOCKER_COMPOSE_CMD up -d; then
+        if $DOCKER_COMPOSE_CMD up -d 2>&1 | tee /tmp/docker-compose-output.log; then
+            # エラーメッセージをチェック
+            if grep -q "Error\|error\|failed\|Failed" /tmp/docker-compose-output.log; then
+                log_error "サービスの起動中にエラーが発生しました"
+                log_info "詳細なログを確認してください:"
+                $DOCKER_COMPOSE_CMD logs --tail=20
+                return 1
+            fi
             log_success "全サービスが起動しました"
         else
             log_error "サービスの起動に失敗しました"
+            log_info "詳細なログを確認してください:"
+            $DOCKER_COMPOSE_CMD logs --tail=20
             return 1
         fi
     else
         # 指定されたサービスを起動
-        if $DOCKER_COMPOSE_CMD up -d $services; then
+        if $DOCKER_COMPOSE_CMD up -d $services 2>&1 | tee /tmp/docker-compose-output.log; then
+            # エラーメッセージをチェック
+            if grep -q "Error\|error\|failed\|Failed" /tmp/docker-compose-output.log; then
+                log_error "サービスの起動中にエラーが発生しました: $services"
+                log_info "詳細なログを確認してください:"
+                $DOCKER_COMPOSE_CMD logs --tail=20 $services
+                return 1
+            fi
             log_success "サービスが起動しました: $services"
         else
             log_error "サービスの起動に失敗しました: $services"
+            log_info "詳細なログを確認してください:"
+            $DOCKER_COMPOSE_CMD logs --tail=20 $services
             return 1
         fi
     fi

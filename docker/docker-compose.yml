@@ -2,6 +2,7 @@ services:
   nginx:
     # OpenAppSec公式のNginxイメージ（Attachment Moduleが組み込まれている）
     image: ghcr.io/openappsec/nginx-attachment:latest
+    platform: linux/amd64
     container_name: mwd-nginx
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
@@ -27,6 +28,7 @@ services:
   openappsec-agent:
     # OpenAppSec公式のAgentイメージ
     image: ghcr.io/openappsec/agent:latest
+    platform: linux/amd64
     container_name: mwd-openappsec-agent
     volumes:
       # OpenAppSec設定ファイルのマウント
