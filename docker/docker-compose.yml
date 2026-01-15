@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:latest
+    container_name: mwd-nginx
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d:ro
+      - nginx-shm:/var/cache/nginx/shared
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - openappsec-agent
+    networks:
+      - mwd-network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  openappsec-agent:
+    image: openappsec/agent:latest
+    container_name: mwd-openappsec-agent
+    volumes:
+      - ./docker/openappsec/local_policy.yaml:/etc/openappsec/local_policy.yaml:ro
+      - nginx-shm:/var/cache/nginx/shared
+    environment:
+      - OPENAPPSEC_LOG_LEVEL=info
+      - OPENAPPSEC_POLICY_FILE=/etc/openappsec/local_policy.yaml
+    networks:
+      - mwd-network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  nginx-shm:
+    driver: local
+
+networks:
+  mwd-network:
+    driver: bridge
