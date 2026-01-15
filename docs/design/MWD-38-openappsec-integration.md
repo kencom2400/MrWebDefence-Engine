@@ -95,11 +95,7 @@ MrWebDefence-Engine/
 │   │       ├── example2.com.conf   # FQDN別バーチャルホスト設定
 │   │       └── example3.com.conf   # FQDN別バーチャルホスト設定
 │   └── openappsec/
-│       ├── agent-config.yaml        # OpenAppSec Agent基本設定
-│       └── fqdn-configs/            # FQDN別WAF設定
-│           ├── example1.com.yaml    # example1.com用WAF設定
-│           ├── example2.com.yaml    # example2.com用WAF設定
-│           └── example3.com.yaml    # example3.com用WAF設定
+│       └── local_policy.yaml        # OpenAppSecポリシー設定（FQDN別設定含む）
 ├── scripts/
 │   └── openappsec/
 │       ├── install.sh               # OpenAppSecインストールスクリプト
@@ -138,12 +134,11 @@ services:
     image: openappsec/agent:latest
     container_name: mwd-openappsec-agent
     volumes:
-      - ./docker/openappsec/agent-config.yaml:/etc/openappsec/agent-config.yaml:ro
-      - ./docker/openappsec/fqdn-configs:/etc/openappsec/fqdn-configs:ro
+      - ./docker/openappsec/local_policy.yaml:/etc/openappsec/local_policy.yaml:ro
       - nginx-shm:/var/cache/nginx/shared
     environment:
       - OPENAPPSEC_LOG_LEVEL=info
-      - OPENAPPSEC_FQDN_CONFIG_DIR=/etc/openappsec/fqdn-configs
+      - OPENAPPSEC_POLICY_FILE=/etc/openappsec/local_policy.yaml
     networks:
       - mwd-network
     restart: unless-stopped
@@ -214,11 +209,10 @@ server {
     server_name example1.com www.example1.com;
 
     # OpenAppSecによるリクエストインターセプト
-    # FQDN情報をAgentに送信
+    # FQDNはserver_nameから自動認識される
     location / {
-        # OpenAppSecによる検査を有効化（FQDN別設定を適用）
-        openappsec_inspect on;
-        openappsec_fqdn example1.com;  # FQDNを指定
+        # OpenAppSecによる検査を有効化
+        # FQDN別設定はlocal_policy.yamlのspecificRulesで定義
         
         # バックエンドへのプロキシ
         proxy_pass http://backend1:3000;
@@ -246,9 +240,8 @@ server {
 
     # OpenAppSecによるリクエストインターセプト
     location / {
-        # OpenAppSecによる検査を有効化（FQDN別設定を適用）
-        openappsec_inspect on;
-        openappsec_fqdn example2.com;  # FQDNを指定
+        # OpenAppSecによる検査を有効化
+        # FQDN別設定はlocal_policy.yamlのspecificRulesで定義
         
         # バックエンドへのプロキシ
         proxy_pass http://backend2:3000;
@@ -276,9 +269,8 @@ server {
 
     # OpenAppSecによるリクエストインターセプト
     location / {
-        # OpenAppSecによる検査を有効化（FQDN別設定を適用）
-        openappsec_inspect on;
-        openappsec_fqdn example3.com;  # FQDNを指定
+        # OpenAppSecによる検査を有効化
+        # FQDN別設定はlocal_policy.yamlのspecificRulesで定義
         
         # バックエンドへのプロキシ
         proxy_pass http://backend3:3000;
@@ -299,163 +291,102 @@ server {
 
 ### 4. OpenAppSec Agent設定
 
-#### agent-config.yaml（基本設定）
+OpenAppSecは`local_policy.yaml`という1つの設定ファイルで、デフォルトポリシーとFQDN別の特定ルール（`specificRules`）を定義します。
+
+#### local_policy.yaml（OpenAppSecポリシー設定）
 
 ```yaml
-agent:
-  name: mwd-openappsec-agent
-  version: "1.0.0"
-  
-  # 通信設定
-  communication:
-    type: shared_memory
-    shared_memory_zone: openappsec_shm
-    socket_path: /var/cache/nginx/shared/openappsec.sock
+apiVersion: v1beta2
 
-  # FQDN別設定の有効化
-  fqdn_based_config:
+# デフォルトポリシー（すべてのFQDNに適用、specificRulesで上書き可能）
+policies:
+  default:
+    mode: detect-learn  # デフォルトは検出+学習モード
+    threatPreventionPractices:
+      - webapp-default-practice
+    accessControlPractices:
+      - rate-limit-default
+    triggers:
+      - default-log-trigger
+    customResponse: default-block-response
+    sourceIdentifiers: default-source-identifiers
+    trustedSources: default-trusted-sources
+    exceptions:
+      - default-exception
+
+  # FQDN別の特定ルール（defaultを上書き）
+  specificRules:
+    # example1.com用の設定
+    - host: "example1.com"
+      name: example1-rule
+      mode: prevent-learn  # このFQDNはブロック+学習モード
+      threatPreventionPractices:
+        - webapp-strict-practice  # 厳格な保護
+      accessControlPractices:
+        - rate-limit-strict  # 厳格なレート制限
+      triggers:
+        - example1-log-trigger
+      customResponse: example1-block-response
+      sourceIdentifiers: example1-source-identifiers
+      trustedSources: example1-trusted-sources
+      exceptions:
+        - example1-exception
+
+    # example2.com用の設定
+    - host: "example2.com"
+      name: example2-rule
+      mode: detect-learn  # このFQDNは検出+学習モード（ブロックしない）
+      threatPreventionPractices:
+        - webapp-default-practice
+      accessControlPractices:
+        - rate-limit-relaxed  # 緩いレート制限
+      triggers:
+        - example2-log-trigger
+      # customResponse等は省略可能（defaultを継承）
+
+    # example3.com用の設定
+    - host: "example3.com"
+      name: example3-rule
+      mode: prevent-learn  # このFQDNはブロック+学習モード
+      threatPreventionPractices:
+        - webapp-very-strict-practice  # 非常に厳格な保護
+      accessControlPractices:
+        - rate-limit-very-strict  # 非常に厳格なレート制限
+      triggers:
+        - example3-log-trigger
+      customResponse: example3-block-response
+```
+
+**注意**: 
+- `host`フィールドでFQDNを指定します（`server_name`と一致させる必要があります）
+- `www.example1.com`も含める場合は、別の`specificRules`エントリを追加するか、同じエントリに複数のFQDNを指定する方法を検討します
+- パスを含めることも可能（例: `"example1.com/admin"`）
+
+#### practices定義（参考）
+
+実際の運用では、`threatPreventionPractices`や`accessControlPractices`で参照されるプラクティス定義も必要です。これらは別ファイルまたは同じファイル内で定義できます。
+
+```yaml
+# プラクティス定義の例（参考）
+practices:
+  webapp-default-practice:
+    # デフォルトのWAF保護ルール
     enabled: true
-    config_directory: /etc/openappsec/fqdn-configs
-    default_config: default.yaml  # デフォルト設定（オプション）
-
-  # グローバルWAF設定（FQDN別設定で上書き可能）
-  waf:
+    
+  webapp-strict-practice:
+    # 厳格なWAF保護ルール
     enabled: true
-    mode: prevention  # detection または prevention
-    learning_mode: false  # 初期はfalse、学習後はtrue
-
-  # MLモデル設定
-  ml:
-    model_path: /etc/openappsec/models
-    update_interval: 3600  # 1時間ごと
-
-  # ログ設定
-  logging:
-    level: info
-    format: json
-    output: stdout
-    fqdn_in_log: true  # ログにFQDNを含める
-
-  # パフォーマンス設定
-  performance:
-    max_concurrent_requests: 1000
-    request_timeout: 5s
-    cache_size: 100MB
-    per_fqdn_cache: true  # FQDN別キャッシュを有効化
-```
-
-#### fqdn-configs/example1.com.yaml（FQDN別設定例）
-
-```yaml
-fqdn: example1.com
-
-# このFQDN専用のWAF設定
-waf:
-  enabled: true
-  mode: prevention  # このFQDNはpreventionモード
-  learning_mode: false
-  
-  # カスタムルール
-  custom_rules:
-    - name: "strict-sql-injection"
-      enabled: true
-      action: block
-    - name: "xss-protection"
-      enabled: true
-      action: block
-    - name: "rate-limiting"
-      enabled: true
-      max_requests_per_minute: 100
-
-# このFQDN専用のML設定
-ml:
-  model_override: null  # グローバル設定を使用
-  sensitivity: high  # 高感度で検出
-
-# ログ設定
-logging:
-  level: info
-  log_blocked_requests: true
-  log_allowed_requests: false
-
-# バックエンド設定（参考情報）
-backend:
-  name: backend1
-  port: 3000
-```
-
-#### fqdn-configs/example2.com.yaml（FQDN別設定例）
-
-```yaml
-fqdn: example2.com
-
-# このFQDN専用のWAF設定
-waf:
-  enabled: true
-  mode: detection  # このFQDNはdetectionモード（検出のみ）
-  learning_mode: true  # 学習モード有効
-  
-  # カスタムルール
-  custom_rules:
-    - name: "basic-protection"
-      enabled: true
-      action: log  # ブロックせずログのみ
-    - name: "rate-limiting"
-      enabled: true
-      max_requests_per_minute: 200  # example1より緩い
-
-# このFQDN専用のML設定
-ml:
-  model_override: null
-  sensitivity: medium  # 中感度で検出
-
-# ログ設定
-logging:
-  level: debug
-  log_blocked_requests: true
-  log_allowed_requests: true  # すべてのリクエストをログ
-
-# バックエンド設定（参考情報）
-backend:
-  name: backend2
-  port: 3000
-```
-
-#### fqdn-configs/example3.com.yaml（FQDN別設定例）
-
-```yaml
-fqdn: example3.com
-
-# このFQDN専用のWAF設定
-waf:
-  enabled: true
-  mode: prevention
-  learning_mode: false
-  
-  # カスタムルール
-  custom_rules:
-    - name: "strict-all"
-      enabled: true
-      action: block
-    - name: "rate-limiting"
-      enabled: true
-      max_requests_per_minute: 50  # 最も厳しい
-
-# このFQDN専用のML設定
-ml:
-  model_override: null
-  sensitivity: very_high  # 最高感度
-
-# ログ設定
-logging:
-  level: warn
-  log_blocked_requests: true
-  log_allowed_requests: false
-
-# バックエンド設定（参考情報）
-backend:
-  name: backend3
-  port: 3000
+    sql_injection_protection: strict
+    xss_protection: strict
+    
+  rate-limit-default:
+    max_requests_per_minute: 100
+    
+  rate-limit-strict:
+    max_requests_per_minute: 50
+    
+  rate-limit-relaxed:
+    max_requests_per_minute: 200
 ```
 
 ### 5. インストールスクリプト
@@ -512,8 +443,8 @@ validate_config() {
         exit 1
     fi
     
-    if [ ! -f "docker/openappsec/agent-config.yaml" ]; then
-        echo "❌ エラー: docker/openappsec/agent-config.yaml が見つかりません"
+    if [ ! -f "docker/openappsec/local_policy.yaml" ]; then
+        echo "❌ エラー: docker/openappsec/local_policy.yaml が見つかりません"
         exit 1
     fi
     
@@ -576,9 +507,10 @@ configure_global_waf_mode() {
             ;;
     esac
     
-    # agent-config.yamlを更新
-    sed -i "s/mode:.*/mode: $MODE/" docker/openappsec/agent-config.yaml
-    echo "✅ グローバルWAFモードを $MODE に設定しました"
+    # local_policy.yamlのdefaultセクションを更新
+    # 注意: YAMLの構造を保持する必要があるため、より高度な処理が必要
+    echo "⚠️  注意: local_policy.yamlの編集は手動で行ってください"
+    echo "    default.mode を $MODE に変更してください"
 }
 
 # FQDN別設定の変更
@@ -592,10 +524,16 @@ configure_fqdn_waf() {
         exit 1
     fi
     
-    FQDN_CONFIG="docker/openappsec/fqdn-configs/${FQDN}.yaml"
+    POLICY_FILE="docker/openappsec/local_policy.yaml"
     
-    if [ ! -f "$FQDN_CONFIG" ]; then
-        echo "❌ エラー: ${FQDN_CONFIG} が見つかりません"
+    if [ ! -f "$POLICY_FILE" ]; then
+        echo "❌ エラー: ${POLICY_FILE} が見つかりません"
+        exit 1
+    fi
+    
+    # local_policy.yamlに該当FQDNのspecificRulesが存在するか確認
+    if ! grep -q "host:.*${FQDN}" "$POLICY_FILE"; then
+        echo "❌ エラー: ${FQDN} の設定がlocal_policy.yamlに見つかりません"
         echo "   先に add-fqdn.sh でFQDNを追加してください"
         exit 1
     fi
@@ -619,9 +557,10 @@ configure_fqdn_waf() {
             ;;
     esac
     
-    # FQDN設定ファイルを更新
-    sed -i "s/mode:.*/mode: $MODE/" "$FQDN_CONFIG"
-    echo "✅ ${FQDN} のWAFモードを $MODE に設定しました"
+    # local_policy.yamlの該当FQDNのspecificRulesを更新
+    # 注意: YAMLの構造を保持する必要があるため、より高度な処理が必要
+    echo "⚠️  注意: local_policy.yamlの編集は手動で行ってください"
+    echo "    ${FQDN} のspecificRules.mode を $MODE に変更してください"
 }
 
 # メイン処理
@@ -742,45 +681,33 @@ EOF
 
 echo "✅ Nginx設定ファイルを作成しました: ${NGINX_CONF}"
 
-# OpenAppSec Agent設定ファイルの作成
-mkdir -p docker/openappsec/fqdn-configs
-FQDN_CONFIG="docker/openappsec/fqdn-configs/${FQDN}.yaml"
-cat > "$FQDN_CONFIG" << EOF
-fqdn: ${FQDN}
+# local_policy.yamlにFQDN設定を追加
+POLICY_FILE="docker/openappsec/local_policy.yaml"
 
-# このFQDN専用のWAF設定
-waf:
-  enabled: true
-  mode: ${WAF_MODE}
-  learning_mode: false
-  
-  # カスタムルール
-  custom_rules:
-    - name: "basic-protection"
-      enabled: true
-      action: block
-    - name: "rate-limiting"
-      enabled: true
-      max_requests_per_minute: 100
+if [ ! -f "$POLICY_FILE" ]; then
+    echo "❌ エラー: ${POLICY_FILE} が見つかりません"
+    echo "   先にlocal_policy.yamlを作成してください"
+    exit 1
+fi
 
-# このFQDN専用のML設定
-ml:
-  model_override: null
-  sensitivity: medium
+# local_policy.yamlにspecificRulesエントリを追加
+# 注意: この処理は簡易版です。実際の運用ではYAMLパーサーを使用することを推奨
+cat >> "$POLICY_FILE" << EOF
 
-# ログ設定
-logging:
-  level: info
-  log_blocked_requests: true
-  log_allowed_requests: false
-
-# バックエンド設定（参考情報）
-backend:
-  name: ${BACKEND_HOST}
-  port: ${BACKEND_PORT}
+    # ${FQDN}用の設定（自動生成）
+    - host: "${FQDN}"
+      name: ${FQDN//\./-}-rule
+      mode: ${WAF_MODE}-learn
+      threatPreventionPractices:
+        - webapp-default-practice
+      accessControlPractices:
+        - rate-limit-default
+      triggers:
+        - default-log-trigger
 EOF
 
-echo "✅ OpenAppSec設定ファイルを作成しました: ${FQDN_CONFIG}"
+echo "✅ local_policy.yamlに${FQDN}の設定を追加しました"
+echo "⚠️  注意: YAMLの構文を確認し、必要に応じて手動で調整してください"
 
 echo ""
 echo "🔄 設定を反映するためにコンテナを再起動しますか？ (y/n)"
@@ -819,9 +746,9 @@ fi
 
 # 確認
 echo ""
-echo "⚠️  以下のファイルが削除されます:"
+echo "⚠️  以下のファイルが削除/変更されます:"
 echo "  - docker/nginx/conf.d/${FQDN}.conf"
-echo "  - docker/openappsec/fqdn-configs/${FQDN}.yaml"
+echo "  - docker/openappsec/local_policy.yaml (${FQDN}の設定を削除)"
 echo ""
 read -p "本当に削除しますか？ (yes/no): " confirm
 
@@ -832,7 +759,7 @@ fi
 
 # ファイルの削除
 NGINX_CONF="docker/nginx/conf.d/${FQDN}.conf"
-FQDN_CONFIG="docker/openappsec/fqdn-configs/${FQDN}.yaml"
+POLICY_FILE="docker/openappsec/local_policy.yaml"
 
 if [ -f "$NGINX_CONF" ]; then
     rm "$NGINX_CONF"
@@ -841,11 +768,13 @@ else
     echo "⚠️  警告: ${NGINX_CONF} が見つかりません"
 fi
 
-if [ -f "$FQDN_CONFIG" ]; then
-    rm "$FQDN_CONFIG"
-    echo "✅ OpenAppSec設定ファイルを削除しました: ${FQDN_CONFIG}"
+# local_policy.yamlから該当FQDNの設定を削除
+if [ -f "$POLICY_FILE" ]; then
+    # 簡易的な削除（実際の運用ではYAMLパーサーを使用することを推奨）
+    echo "⚠️  注意: local_policy.yamlから${FQDN}の設定を手動で削除してください"
+    echo "    host: \"${FQDN}\" を含むspecificRulesエントリを削除してください"
 else
-    echo "⚠️  警告: ${FQDN_CONFIG} が見つかりません"
+    echo "⚠️  警告: ${POLICY_FILE} が見つかりません"
 fi
 
 echo ""
@@ -957,7 +886,7 @@ main "$@"
 1. **ディレクトリ構造の作成**
    ```bash
    mkdir -p docker/nginx/conf.d
-   mkdir -p docker/openappsec/fqdn-configs
+   mkdir -p docker/openappsec
    mkdir -p scripts/openappsec
    ```
 
@@ -969,8 +898,8 @@ main "$@"
    - FQDN別設定ファイルのテンプレートを作成
 
 4. **OpenAppSec Agent設定の作成**
-   - `docker/openappsec/agent-config.yaml` を作成（FQDN別設定対応）
-   - FQDN別設定のテンプレートを作成
+   - `docker/openappsec/local_policy.yaml` を作成
+   - `default`ポリシーと`specificRules`でFQDN別設定を定義
 
 ### Phase 2: スクリプト実装
 
@@ -1051,13 +980,15 @@ main "$@"
    - ログの確認
 
 4. **特定のFQDNでWAFが動作しない**
-   - FQDN設定ファイル（`fqdn-configs/{fqdn}.yaml`）の存在確認
-   - Nginx設定ファイル（`conf.d/{fqdn}.conf`）の`openappsec_fqdn`ディレクティブの確認
+   - `local_policy.yaml`の`specificRules`に該当FQDNの設定が存在するか確認
+   - Nginx設定ファイル（`conf.d/{fqdn}.conf`）の`server_name`が正しいか確認
    - AgentログでFQDNが正しく認識されているか確認
+   - `local_policy.yaml`のYAML構文エラーを確認
 
 5. **FQDN別設定が反映されない**
-   - Agent設定ファイルの`fqdn_based_config.enabled`が`true`か確認
-   - FQDN設定ファイルのYAML構文エラーを確認
+   - `local_policy.yaml`の`specificRules`に該当FQDNのエントリが存在するか確認
+   - `host`フィールドの値が`server_name`と一致しているか確認
+   - YAML構文エラーを確認（インデント、コロン、引用符など）
    - Agentコンテナの再起動を実行
 
 6. **複数FQDNでパフォーマンスが低下**
