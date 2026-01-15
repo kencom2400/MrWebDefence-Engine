@@ -22,10 +22,31 @@ policies:
     exceptions: []
 
   # FQDN別の設定（specificRules）
-  # 設定取得エージェントが自動生成するため、初期は空
-  # 例:
-  # - host: "test.example.com"
-  #   mode: detect-learn
-  #   threatPreventionPractices: []
-  #   accessControlPractices: []
-  specificRules: []
+  # Phase 2.2で複数FQDNの設定を追加
+  # 設定取得エージェントが自動生成するようになるため、手動設定は一時的
+  specificRules:
+    # テスト用FQDN設定
+    - host: "test.example.com"
+      mode: detect-learn
+      threatPreventionPractices: []
+      accessControlPractices: []
+      triggers: []
+      customResponse: 403
+    - host: "example1.com"
+      mode: detect-learn
+      threatPreventionPractices: []
+      accessControlPractices: []
+      triggers: []
+      customResponse: 403
+    - host: "example2.com"
+      mode: detect-learn
+      threatPreventionPractices: []
+      accessControlPractices: []
+      triggers: []
+      customResponse: 403
+    - host: "example3.com"
+      mode: detect-learn
+      threatPreventionPractices: []
+      accessControlPractices: []
+      triggers: []
+      customResponse: 403
