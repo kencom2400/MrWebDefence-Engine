@@ -1,4 +1,7 @@
 apiVersion: v1beta2
+kind: LocalPolicy
+metadata:
+  name: default-policy
 policies:
   default:
     # デフォルトポリシー設定
@@ -10,15 +13,19 @@ policies:
     
     # デフォルトのセキュリティプラクティス
     # 基本的なWAF保護を有効化（学習モード）
-    threatPreventionPractices:
-      - name: default-threat-prevention
-        # 学習モード: 検知のみ（ブロックしない）
-        learningMode: true
-    
-    accessControlPractices:
-      - name: default-access-control
-        learningMode: true
+    # 注意: 実際のプラクティス定義は別途必要ですが、最小構成では空でも動作します
+    threatPreventionPractices: []
+    accessControlPractices: []
+    triggers: []
+    sourceIdentifiers: {}
+    trustedSources: []
+    exceptions: []
 
   # FQDN別の設定（specificRules）
   # 設定取得エージェントが自動生成するため、初期は空
+  # 例:
+  # - host: "test.example.com"
+  #   mode: detect-learn
+  #   threatPreventionPractices: []
+  #   accessControlPractices: []
   specificRules: []

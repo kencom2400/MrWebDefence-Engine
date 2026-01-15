@@ -2,12 +2,14 @@ version: '3.8'
 
 services:
   nginx:
-    image: nginx:latest
+    # OpenAppSec公式のNginxイメージ（Attachment Moduleが組み込まれている）
+    image: ghcr.io/openappsec/nginx-attachment:latest
     container_name: mwd-nginx
     volumes:
       - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./docker/nginx/conf.d:/etc/nginx/conf.d:ro
-      - nginx-shm:/var/cache/nginx/shared
+      # 共有メモリ: OpenAppSec AgentとのIPC通信に使用
+      - nginx-shm:/dev/shm
     ports:
       - "80:80"
       - "443:443"
@@ -15,6 +17,8 @@ services:
       - openappsec-agent
     networks:
       - mwd-network
+    # IPC設定: 共有メモリ通信のため重要
+    ipc: host
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -23,16 +27,24 @@ services:
         max-file: "3"
 
   openappsec-agent:
-    image: openappsec/agent:latest
+    # OpenAppSec公式のAgentイメージ
+    image: ghcr.io/openappsec/agent:latest
     container_name: mwd-openappsec-agent
     volumes:
-      - ./docker/openappsec/local_policy.yaml:/etc/openappsec/local_policy.yaml:ro
-      - nginx-shm:/var/cache/nginx/shared
+      # OpenAppSec設定ファイルのマウントパスは公式ドキュメントを確認
+      # 通常は /ext/appsec/local_policy.yaml または /etc/cp/conf/local_policy.yaml
+      - ./docker/openappsec/local_policy.yaml:/ext/appsec/local_policy.yaml:ro
+      # 共有メモリ: NginxとのIPC通信に使用
+      - nginx-shm:/dev/shm
     environment:
       - OPENAPPSEC_LOG_LEVEL=info
-      - OPENAPPSEC_POLICY_FILE=/etc/openappsec/local_policy.yaml
+      # ローカルポリシーファイルのパス（公式イメージのデフォルトパス）
+      - autoPolicyLoad=true
+      # 注意: 実際のパスは公式ドキュメントで確認が必要
     networks:
       - mwd-network
+    # IPC設定: 共有メモリ通信のため重要
+    ipc: host
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -41,8 +53,13 @@ services:
         max-file: "3"
 
 volumes:
+  # 共有メモリ用のtmpfsボリューム
+  # OpenAppSec AgentとNginx間のIPC通信に使用
   nginx-shm:
     driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
 
 networks:
   mwd-network:
