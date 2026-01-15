@@ -31,16 +31,15 @@ services:
     image: ghcr.io/openappsec/agent:latest
     container_name: mwd-openappsec-agent
     volumes:
-      # OpenAppSec設定ファイルのマウントパスは公式ドキュメントを確認
-      # 通常は /ext/appsec/local_policy.yaml または /etc/cp/conf/local_policy.yaml
+      # OpenAppSec設定ファイルのマウント
+      # 公式ドキュメントによると、通常は /ext/appsec/local_policy.yaml
       - ./docker/openappsec/local_policy.yaml:/ext/appsec/local_policy.yaml:ro
       # 共有メモリ: NginxとのIPC通信に使用
       - nginx-shm:/dev/shm
     environment:
       - OPENAPPSEC_LOG_LEVEL=info
-      # ローカルポリシーファイルのパス（公式イメージのデフォルトパス）
+      # ローカルポリシーファイルを自動読み込み
       - autoPolicyLoad=true
-      # 注意: 実際のパスは公式ドキュメントで確認が必要
     networks:
       - mwd-network
     # IPC設定: 共有メモリ通信のため重要
