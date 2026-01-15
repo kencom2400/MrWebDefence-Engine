@@ -105,16 +105,79 @@ OpenAppSecをベースとしてWAF（Web Application Firewall）機能を提供�
    - ブロック/許可の判定
 
 3. **設定取得エージェント（ConfigAgent）**
+   - **実装場所**: MrWebDefence-Engineリポジトリ
    - 管理APIから設定を取得（ポーリング、デフォルト5分間隔）
    - OpenAppSec設定ファイル（`local_policy.yaml`）を生成・更新
    - Nginx設定ファイルを生成・更新
    - 設定のバージョン管理
    - 設定のローカルキャッシュ（TTL: 5分）
 
-4. **共有メモリ（Shared Memory）**
+4. **管理API（設定管理API）**
+   - **実装場所**: MrWebDefence-Consoleリポジトリ
+   - **言語**: TypeScript
+   - **フレームワーク**: FastAPI/Gin/Express（設計書参照）
+   - **エンドポイント**: `GET /engine/v1/config`
+   - **認証**: APIトークン（`Authorization: Bearer <token>`）
+   - **責務**: 
+     - データベースからFQDN設定とシグニチャグループ設定を取得
+     - OpenAppSec設定形式に変換して返却
+     - WAFエンジン向けの設定配信
+
+5. **共有メモリ（Shared Memory）**
    - NginxとAgent間の高速通信
    - セッション情報、リクエストメタデータの共有
    - パフォーマンス最適化
+
+## リポジトリ構成とコンポーネントの関係
+
+### リポジトリ構成
+
+| リポジトリ名 | 言語 | 主な責務 | 本設計書での対象 |
+|------------|------|---------|----------------|
+| **MrWebDefence-Engine** | Shell | WAFエンジン（OpenAppSec統合） | ✅ 本リポジトリ |
+| **MrWebDefence-Console** | TypeScript | 管理画面（フロントエンド・バックエンド） | ⚠️ 管理APIは別リポジトリ |
+| **MrWebDefence-Design** | - | 設計・ドキュメント管理 | 📚 参照設計書 |
+
+### コンポーネント間の関係
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  MrWebDefence-Engine (本リポジトリ)                    │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │  - Nginx + OpenAppSec Agent                      │  │
+│  │  - 設定取得エージェント（ConfigAgent）           │  │
+│  │  - 設定ファイル生成・更新                        │  │
+│  └──────────────────────────────────────────────────┘  │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+                       │ HTTPS (APIトークン認証)
+                       │ GET /engine/v1/config
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│  MrWebDefence-Console (別リポジトリ)                   │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │  - 管理API（設定管理API）                        │  │
+│  │  - バックエンドサービス（設定管理サービス）       │  │
+│  │  - 管理画面（フロントエンド）                    │  │
+│  └──────────────────────────────────────────────────┘  │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+                       │ MySQL Protocol
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│  MySQL Database                                         │
+│  - fqdnsテーブル                                        │
+│  - signature_groupsテーブル                             │
+│  - customer_signature_group_settingsテーブル            │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 注意事項
+
+- **管理APIの実装**: 管理API（`GET /engine/v1/config`）は**MrWebDefence-Consoleリポジトリ**で実装されます
+- **設定取得エージェント**: 本リポジトリ（MrWebDefence-Engine）で実装されます
+- **接続設定**: 設定取得エージェントは環境変数`CONFIG_API_URL`で管理APIのURLを指定します
+  - 例: `CONFIG_API_URL=https://console.example.com` または `http://config-api:8080`（同一Dockerネットワーク内の場合）
 
 ## 実装詳細
 
@@ -783,9 +846,17 @@ reload_nginx_config() {
 
 #### 5.4 管理APIエンドポイント仕様
 
+**⚠️ 注意**: このエンドポイントは**MrWebDefence-Consoleリポジトリ**で実装されます。本リポジトリ（MrWebDefence-Engine）の設定取得エージェントは、このエンドポイントを呼び出します。
+
 ##### GET /engine/v1/config
 
+**実装場所**: MrWebDefence-Consoleリポジトリ
+
 **認証**: APIトークン（`Authorization: Bearer <token>`）
+
+**接続方法**: 
+- 環境変数`CONFIG_API_URL`で管理APIのURLを指定
+- 例: `CONFIG_API_URL=https://console.example.com` または `http://config-api:8080`
 
 **レスポンス形式**:
 
