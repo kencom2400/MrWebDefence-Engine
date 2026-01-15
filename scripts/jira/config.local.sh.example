@@ -1,0 +1,21 @@
+#!/bin/bash
+
+# Jira認証情報設定ファイル（ローカル用）
+# 
+# 使用方法:
+# 1. このファイルをコピーして config.local.sh を作成
+#    cp config.local.sh.example config.local.sh
+#
+# 2. config.local.sh に認証情報を設定
+#    JIRA_EMAIL='your-email@example.com'
+#    JIRA_API_TOKEN='your-api-token'
+#
+# 3. config.local.sh は .gitignore に追加されているため、gitにpushされません
+
+# Jira認証情報
+export JIRA_EMAIL='your-email@example.com'
+export JIRA_API_TOKEN='your-api-token'
+
+# オプション: JiraインスタンスのベースURL（デフォルト値があるため通常は不要）
+# export JIRA_BASE_URL='https://kencom2400.atlassian.net'
+
