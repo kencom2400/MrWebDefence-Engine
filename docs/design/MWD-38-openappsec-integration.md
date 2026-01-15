@@ -1,8 +1,16 @@
-# Task 5.1: OpenAppSec統合 設計書
+# Task 5.1: OpenAppSec統合 実装設計書
 
 ## 概要
 
-OpenAppSecをベースとしてWAF（Web Application Firewall）機能を提供するための統合設計。
+OpenAppSecをベースとしてWAF（Web Application Firewall）機能を提供するための実装設計。設計書（MrWebDefence-Design/docs/DESIGN.md）に基づいて実装設計を定義します。
+
+## 参照設計書
+
+- **要件定義**: `MrWebDefence-Design/docs/REQUIREMENT.md`
+- **仕様書**: `MrWebDefence-Design/docs/SPECIFICATION.md`
+- **詳細設計**: `MrWebDefence-Design/docs/DESIGN.md`
+- **OpenAppSec仕様**: `MrWebDefence-Design/docs/OPENAPPSEC_SPECIFICATION.md`
+- **Epic・タスク設計**: `MrWebDefence-Design/docs/EPIC_TASK_DESIGN.md`
 
 ## 目的
 
@@ -11,6 +19,7 @@ OpenAppSecをベースとしてWAF（Web Application Firewall）機能を提供�
 - WAF機能の提供
 - **1つのNginxで複数のFQDNを扱う**
 - **FQDNごとに異なるWAF設定を適用する**
+- **設定取得エージェントによる動的設定更新**
 
 ## アーキテクチャ概要
 
@@ -34,12 +43,6 @@ OpenAppSecをベースとしてWAF（Web Application Firewall）機能を提供�
 │  │  - OpenAppSec Agentと通信（FQDN情報付き）         │  │
 │  │  - 共有メモリを使用                                │  │
 │  └──────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │  Server Blocks (FQDN別設定)                      │  │
-│  │  - example1.com → WAF設定A                       │  │
-│  │  - example2.com → WAF設定B                       │  │
-│  │  - example3.com → WAF設定C                       │  │
-│  └──────────────────────────────────────────────────┘  │
 └──────────────────────┬──────────────────────────────────┘
                        │
                        │ 共有メモリ / IPC (FQDN情報付き)
@@ -54,12 +57,38 @@ OpenAppSecをベースとしてWAF（Web Application Firewall）機能を提供�
 │  └──────────────────────────────────────────────────┘  │
 └──────────────────────┬──────────────────────────────────┘
                        │
+                       │ 設定ファイル参照
                        ▼
 ┌─────────────────────────────────────────────────────────┐
-│         Backend Applications (FQDN別)                     │
-│  - example1.com → Backend A                             │
-│  - example2.com → Backend B                              │
-│  - example3.com → Backend C                              │
+│         ConfigAgent (設定取得エージェント)              │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │  - 管理APIから設定取得（ポーリング5分間隔）       │  │
+│  │  - local_policy.yaml生成・更新                    │  │
+│  │  - Nginx設定ファイル生成・更新                    │  │
+│  │  - 設定のバージョン管理                           │  │
+│  │  - 設定のローカルキャッシュ（TTL: 5分）           │  │
+│  └──────────────────────────────────────────────────┘  │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+                       │ HTTPS (APIトークン認証)
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│              管理API (設定管理API)                      │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │  GET /engine/v1/config                           │  │
+│  │  - FQDN設定取得                                   │  │
+│  │  - シグニチャグループ設定取得                     │  │
+│  │  - OpenAppSec設定形式で返却                       │  │
+│  └──────────────────────────────────────────────────┘  │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+                       │ MySQL Protocol
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│                    MySQL Database                       │
+│  - fqdnsテーブル                                        │
+│  - signature_groupsテーブル                             │
+│  - customer_signature_group_settingsテーブル            │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -75,7 +104,14 @@ OpenAppSecをベースとしてWAF（Web Application Firewall）機能を提供�
    - 機械学習モデルによる脅威検出
    - ブロック/許可の判定
 
-3. **共有メモリ（Shared Memory）**
+3. **設定取得エージェント（ConfigAgent）**
+   - 管理APIから設定を取得（ポーリング、デフォルト5分間隔）
+   - OpenAppSec設定ファイル（`local_policy.yaml`）を生成・更新
+   - Nginx設定ファイルを生成・更新
+   - 設定のバージョン管理
+   - 設定のローカルキャッシュ（TTL: 5分）
+
+4. **共有メモリ（Shared Memory）**
    - NginxとAgent間の高速通信
    - セッション情報、リクエストメタデータの共有
    - パフォーマンス最適化
@@ -90,19 +126,23 @@ MrWebDefence-Engine/
 │   ├── docker-compose.yml          # OpenAppSec統合構成
 │   ├── nginx/
 │   │   ├── nginx.conf              # Nginx設定（Attachment Module読み込み）
-│   │   └── conf.d/
-│   │       ├── example1.com.conf   # FQDN別バーチャルホスト設定
-│   │       ├── example2.com.conf   # FQDN別バーチャルホスト設定
-│   │       └── example3.com.conf   # FQDN別バーチャルホスト設定
+│   │   └── conf.d/                 # FQDN別バーチャルホスト設定（自動生成）
 │   └── openappsec/
-│       └── local_policy.yaml        # OpenAppSecポリシー設定（FQDN別設定含む）
+│       └── local_policy.yaml        # OpenAppSecポリシー設定（自動生成）
+├── config-agent/
+│   ├── config-agent.sh             # 設定取得エージェント（メインスクリプト）
+│   ├── lib/
+│   │   ├── api-client.sh           # 管理APIクライアント
+│   │   ├── config-generator.sh     # 設定ファイル生成
+│   │   ├── nginx-config-generator.sh  # Nginx設定生成
+│   │   └── policy-generator.sh     # OpenAppSecポリシー生成
+│   └── config/
+│       └── config-agent.conf        # エージェント設定
 ├── scripts/
 │   └── openappsec/
 │       ├── install.sh               # OpenAppSecインストールスクリプト
-│       ├── configure.sh             # 設定スクリプト
-│       ├── add-fqdn.sh              # FQDN追加スクリプト
-│       ├── remove-fqdn.sh           # FQDN削除スクリプト
-│       └── health-check.sh          # ヘルスチェックスクリプト
+│       ├── health-check.sh          # ヘルスチェックスクリプト
+│       └── start-config-agent.sh   # 設定取得エージェント起動スクリプト
 └── docs/
     └── design/
         └── MWD-38-openappsec-integration.md  # 本設計書
@@ -126,6 +166,7 @@ services:
       - "443:443"
     depends_on:
       - openappsec-agent
+      - config-agent
     networks:
       - mwd-network
     restart: unless-stopped
@@ -139,6 +180,23 @@ services:
     environment:
       - OPENAPPSEC_LOG_LEVEL=info
       - OPENAPPSEC_POLICY_FILE=/etc/openappsec/local_policy.yaml
+    networks:
+      - mwd-network
+    restart: unless-stopped
+
+  config-agent:
+    image: alpine:latest
+    container_name: mwd-config-agent
+    volumes:
+      - ./config-agent:/app/config-agent:ro
+      - ./docker/openappsec:/app/output/openappsec:rw
+      - ./docker/nginx/conf.d:/app/output/nginx/conf.d:rw
+    environment:
+      - CONFIG_API_URL=${CONFIG_API_URL:-http://config-api:8080}
+      - CONFIG_API_TOKEN=${CONFIG_API_TOKEN}
+      - POLLING_INTERVAL=${POLLING_INTERVAL:-300}
+      - CACHE_TTL=${CACHE_TTL:-300}
+    command: /bin/sh -c "apk add --no-cache curl jq bash && /app/config-agent/config-agent.sh"
     networks:
       - mwd-network
     restart: unless-stopped
@@ -196,17 +254,271 @@ http {
     openappsec_agent_url http://openappsec-agent:8080;
     openappsec_enabled on;
 
-    # 設定ファイルの読み込み
+    # 設定ファイルの読み込み（FQDN別設定は自動生成される）
     include /etc/nginx/conf.d/*.conf;
 }
 ```
 
-#### conf.d/example1.com.conf
+#### conf.d/*.conf（自動生成）
 
-```nginx
+設定取得エージェントが各FQDNごとに自動生成します。
+
+### 4. OpenAppSec Agent設定
+
+#### local_policy.yaml（自動生成）
+
+設定取得エージェントが管理APIから取得した設定を基に自動生成します。
+
+### 5. 設定取得エージェント（ConfigAgent）
+
+#### 5.1 概要
+
+設定取得エージェントは、管理APIからFQDN設定とシグニチャグループ設定を取得し、OpenAppSec設定ファイル（`local_policy.yaml`）とNginx設定ファイルを自動生成・更新します。
+
+#### 5.2 機能
+
+1. **設定取得**
+   - 管理APIから設定を取得（`GET /engine/v1/config`）
+   - ポーリング方式（デフォルト5分間隔）
+   - APIトークン認証
+
+2. **設定ファイル生成**
+   - OpenAppSec設定ファイル（`local_policy.yaml`）の生成
+   - Nginx設定ファイル（`conf.d/{fqdn}.conf`）の生成
+
+3. **設定の動的更新**
+   - 設定ファイルの更新
+   - OpenAppSec Agentの設定リロード（再起動不要）
+   - Nginxの設定リロード（`nginx -s reload`）
+
+4. **バージョン管理**
+   - 設定のバージョン番号で変更検知
+   - 変更がない場合は更新をスキップ
+
+5. **ローカルキャッシュ**
+   - 取得した設定をローカルにキャッシュ（TTL: 5分）
+   - キャッシュ有効期間中はAPI呼び出しをスキップ
+
+#### 5.3 実装詳細
+
+##### config-agent.sh（メインスクリプト）
+
+```bash
+#!/bin/bash
+
+set -e
+
+# 設定ファイルの読み込み
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/api-client.sh"
+source "${SCRIPT_DIR}/lib/config-generator.sh"
+source "${SCRIPT_DIR}/lib/nginx-config-generator.sh"
+source "${SCRIPT_DIR}/lib/policy-generator.sh"
+
+# 設定の読み込み
+CONFIG_API_URL="${CONFIG_API_URL:-http://config-api:8080}"
+CONFIG_API_TOKEN="${CONFIG_API_TOKEN}"
+POLLING_INTERVAL="${POLLING_INTERVAL:-300}"
+CACHE_TTL="${CACHE_TTL:-300}"
+
+OUTPUT_DIR="/app/output"
+OPENAPPSEC_CONFIG="${OUTPUT_DIR}/openappsec/local_policy.yaml"
+NGINX_CONF_DIR="${OUTPUT_DIR}/nginx/conf.d"
+
+# メインループ
+main_loop() {
+    local last_version=""
+    local cache_file="/tmp/config_cache.json"
+    local cache_timestamp_file="/tmp/config_cache_timestamp"
+    
+    while true; do
+        echo "[$(date +'%Y-%m-%d %H:%M:%S')] 設定取得を開始..."
+        
+        # キャッシュの確認
+        if [ -f "$cache_file" ] && [ -f "$cache_timestamp_file" ]; then
+            local cache_age=$(($(date +%s) - $(cat "$cache_timestamp_file")))
+            if [ $cache_age -lt $CACHE_TTL ]; then
+                echo "  ⏭️  キャッシュが有効（残り時間: $((CACHE_TTL - cache_age))秒）"
+                sleep $POLLING_INTERVAL
+                continue
+            fi
+        fi
+        
+        # 設定取得
+        local config_data
+        config_data=$(fetch_config_from_api)
+        
+        if [ $? -ne 0 ] || [ -z "$config_data" ]; then
+            echo "  ❌ 設定取得に失敗しました。リトライします..."
+            sleep 60
+            continue
+        fi
+        
+        # バージョン確認
+        local current_version
+        current_version=$(echo "$config_data" | jq -r '.version // empty')
+        
+        if [ "$current_version" = "$last_version" ]; then
+            echo "  ⏭️  設定に変更がありません（バージョン: $current_version）"
+            # キャッシュを更新
+            echo "$config_data" > "$cache_file"
+            echo "$(date +%s)" > "$cache_timestamp_file"
+            sleep $POLLING_INTERVAL
+            continue
+        fi
+        
+        echo "  🔄 設定を更新中（バージョン: $last_version → $current_version）..."
+        
+        # 設定ファイル生成
+        generate_openappsec_policy "$config_data" "$OPENAPPSEC_CONFIG"
+        generate_nginx_configs "$config_data" "$NGINX_CONF_DIR"
+        
+        # OpenAppSec Agentの設定リロード
+        reload_openappsec_config
+        
+        # Nginxの設定リロード
+        reload_nginx_config
+        
+        # バージョンを更新
+        last_version="$current_version"
+        
+        # キャッシュを更新
+        echo "$config_data" > "$cache_file"
+        echo "$(date +%s)" > "$cache_timestamp_file"
+        
+        echo "  ✅ 設定更新完了（バージョン: $current_version）"
+        
+        sleep $POLLING_INTERVAL
+    done
+}
+
+# エージェント起動
+main_loop
+```
+
+##### lib/api-client.sh（APIクライアント）
+
+```bash
+#!/bin/bash
+
+# 管理APIから設定を取得
+fetch_config_from_api() {
+    local api_url="${CONFIG_API_URL}/engine/v1/config"
+    local token="${CONFIG_API_TOKEN}"
+    
+    if [ -z "$token" ]; then
+        echo "❌ エラー: CONFIG_API_TOKENが設定されていません" >&2
+        return 1
+    fi
+    
+    local response
+    local http_code
+    
+    response=$(curl -s -w "\n%{http_code}" \
+        -X GET \
+        -H "Authorization: Bearer ${token}" \
+        -H "Accept: application/json" \
+        "$api_url" 2>&1)
+    
+    http_code=$(echo "$response" | tail -n1)
+    response_body=$(echo "$response" | sed '$d')
+    
+    if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+        echo "$response_body"
+        return 0
+    else
+        echo "❌ HTTPエラー: $http_code" >&2
+        echo "$response_body" >&2
+        return 1
+    fi
+}
+```
+
+##### lib/policy-generator.sh（OpenAppSecポリシー生成）
+
+```bash
+#!/bin/bash
+
+# OpenAppSec設定ファイル（local_policy.yaml）を生成
+generate_openappsec_policy() {
+    local config_data="$1"
+    local output_file="$2"
+    
+    # 出力ディレクトリを作成
+    mkdir -p "$(dirname "$output_file")"
+    
+    # デフォルトポリシー
+    local default_mode
+    default_mode=$(echo "$config_data" | jq -r '.default_mode // "detect-learn"')
+    
+    # FQDN別設定（specificRules）
+    local specific_rules
+    specific_rules=$(echo "$config_data" | jq -r '.fqdns[]? | {
+        host: .fqdn,
+        name: (.fqdn | gsub("\\."; "-") | . + "-rule"),
+        mode: (.waf_mode // "detect-learn"),
+        threatPreventionPractices: (.threat_prevention_practice // "webapp-default-practice" | split(",") | map(. | ltrimstr(" ") | rtrimstr(" "))),
+        accessControlPractices: (.access_control_practice // "rate-limit-default" | split(",") | map(. | ltrimstr(" ") | rtrimstr(" "))),
+        triggers: (.log_trigger // "default-log-trigger" | split(",") | map(. | ltrimstr(" ") | rtrimstr(" "))),
+        customResponse: .custom_response
+    }' | jq -s '.')
+    
+    # YAML生成（jqを使用）
+    cat > "$output_file" << EOF
+apiVersion: v1beta2
+
+policies:
+  default:
+    mode: ${default_mode}
+    threatPreventionPractices:
+      - webapp-default-practice
+    accessControlPractices:
+      - rate-limit-default
+    triggers:
+      - default-log-trigger
+    customResponse: default-block-response
+
+  specificRules:
+$(echo "$specific_rules" | jq -r '.[] | "    - host: \"\(.host)\"\n      name: \(.name)\n      mode: \(.mode)\n      threatPreventionPractices:\n\(.threatPreventionPractices | map("        - \(.)") | join("\n"))\n      accessControlPractices:\n\(.accessControlPractices | map("        - \(.)") | join("\n"))\n      triggers:\n\(.triggers | map("        - \(.)") | join("\n"))" + (if .customResponse then "\n      customResponse: \(.customResponse)" else "" end)')
+EOF
+    
+    echo "✅ OpenAppSec設定ファイルを生成しました: $output_file"
+}
+```
+
+##### lib/nginx-config-generator.sh（Nginx設定生成）
+
+```bash
+#!/bin/bash
+
+# Nginx設定ファイルを生成
+generate_nginx_configs() {
+    local config_data="$1"
+    local output_dir="$2"
+    
+    # 出力ディレクトリを作成
+    mkdir -p "$output_dir"
+    
+    # 各FQDNごとに設定ファイルを生成
+    echo "$config_data" | jq -r '.fqdns[]? | .fqdn' | while read -r fqdn; do
+        if [ -z "$fqdn" ]; then
+            continue
+        fi
+        
+        local fqdn_config
+        fqdn_config=$(echo "$config_data" | jq -r --arg fqdn "$fqdn" '.fqdns[] | select(.fqdn == $fqdn)')
+        
+        local backend_host
+        backend_host=$(echo "$fqdn_config" | jq -r '.backend_host // "backend"')
+        local backend_port
+        backend_port=$(echo "$fqdn_config" | jq -r '.backend_port // 3000')
+        
+        local config_file="${output_dir}/${fqdn}.conf"
+        
+        cat > "$config_file" << EOF
 server {
     listen 80;
-    server_name example1.com www.example1.com;
+    server_name ${fqdn} www.${fqdn};
 
     # OpenAppSecによるリクエストインターセプト
     # FQDNはserver_nameから自動認識される
@@ -215,11 +527,11 @@ server {
         # FQDN別設定はlocal_policy.yamlのspecificRulesで定義
         
         # バックエンドへのプロキシ
-        proxy_pass http://backend1:3000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass http://${backend_host}:${backend_port};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
     # ヘルスチェックエンドポイント（OpenAppSecをバイパス）
@@ -229,167 +541,117 @@ server {
         add_header Content-Type text/plain;
     }
 }
-```
-
-#### conf.d/example2.com.conf
-
-```nginx
-server {
-    listen 80;
-    server_name example2.com www.example2.com;
-
-    # OpenAppSecによるリクエストインターセプト
-    location / {
-        # OpenAppSecによる検査を有効化
-        # FQDN別設定はlocal_policy.yamlのspecificRulesで定義
+EOF
         
-        # バックエンドへのプロキシ
-        proxy_pass http://backend2:3000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # ヘルスチェックエンドポイント（OpenAppSecをバイパス）
-    location /health {
-        access_log off;
-        return 200 "healthy\n";
-        add_header Content-Type text/plain;
-    }
-}
-```
-
-#### conf.d/example3.com.conf
-
-```nginx
-server {
-    listen 80;
-    server_name example3.com www.example3.com;
-
-    # OpenAppSecによるリクエストインターセプト
-    location / {
-        # OpenAppSecによる検査を有効化
-        # FQDN別設定はlocal_policy.yamlのspecificRulesで定義
+        echo "✅ Nginx設定ファイルを生成しました: $config_file"
+    done
+    
+    # 無効化されたFQDNの設定ファイルを削除
+    local active_fqdns
+    active_fqdns=$(echo "$config_data" | jq -r '.fqdns[]? | select(.is_active == true) | .fqdn')
+    
+    for config_file in "$output_dir"/*.conf; do
+        if [ ! -f "$config_file" ]; then
+            continue
+        fi
         
-        # バックエンドへのプロキシ
-        proxy_pass http://backend3:3000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # ヘルスチェックエンドポイント（OpenAppSecをバイパス）
-    location /health {
-        access_log off;
-        return 200 "healthy\n";
-        add_header Content-Type text/plain;
-    }
+        local file_fqdn
+        file_fqdn=$(basename "$config_file" .conf)
+        
+        if ! echo "$active_fqdns" | grep -q "^${file_fqdn}$"; then
+            echo "🗑️  無効化されたFQDNの設定ファイルを削除: $config_file"
+            rm -f "$config_file"
+        fi
+    done
 }
 ```
 
-### 4. OpenAppSec Agent設定
+##### lib/config-generator.sh（設定リロード）
 
-OpenAppSecは`local_policy.yaml`という1つの設定ファイルで、デフォルトポリシーとFQDN別の特定ルール（`specificRules`）を定義します。
+```bash
+#!/bin/bash
 
-#### local_policy.yaml（OpenAppSecポリシー設定）
+# OpenAppSec Agentの設定リロード
+reload_openappsec_config() {
+    # OpenAppSec Agentは設定ファイルの変更を自動検知するため、
+    # ファイルを更新するだけでリロードされる
+    # 必要に応じてシグナルを送信
+    if docker ps | grep -q mwd-openappsec-agent; then
+        echo "  🔄 OpenAppSec Agentの設定をリロード中..."
+        # OpenAppSec Agentが設定ファイルの変更を検知するまで待機
+        sleep 2
+        echo "  ✅ OpenAppSec Agentの設定リロード完了"
+    fi
+}
 
-```yaml
-apiVersion: v1beta2
-
-# デフォルトポリシー（すべてのFQDNに適用、specificRulesで上書き可能）
-policies:
-  default:
-    mode: detect-learn  # デフォルトは検出+学習モード
-    threatPreventionPractices:
-      - webapp-default-practice
-    accessControlPractices:
-      - rate-limit-default
-    triggers:
-      - default-log-trigger
-    customResponse: default-block-response
-    sourceIdentifiers: default-source-identifiers
-    trustedSources: default-trusted-sources
-    exceptions:
-      - default-exception
-
-  # FQDN別の特定ルール（defaultを上書き）
-  specificRules:
-    # example1.com用の設定
-    - host: "example1.com"
-      name: example1-rule
-      mode: prevent-learn  # このFQDNはブロック+学習モード
-      threatPreventionPractices:
-        - webapp-strict-practice  # 厳格な保護
-      accessControlPractices:
-        - rate-limit-strict  # 厳格なレート制限
-      triggers:
-        - example1-log-trigger
-      customResponse: example1-block-response
-      sourceIdentifiers: example1-source-identifiers
-      trustedSources: example1-trusted-sources
-      exceptions:
-        - example1-exception
-
-    # example2.com用の設定
-    - host: "example2.com"
-      name: example2-rule
-      mode: detect-learn  # このFQDNは検出+学習モード（ブロックしない）
-      threatPreventionPractices:
-        - webapp-default-practice
-      accessControlPractices:
-        - rate-limit-relaxed  # 緩いレート制限
-      triggers:
-        - example2-log-trigger
-      # customResponse等は省略可能（defaultを継承）
-
-    # example3.com用の設定
-    - host: "example3.com"
-      name: example3-rule
-      mode: prevent-learn  # このFQDNはブロック+学習モード
-      threatPreventionPractices:
-        - webapp-very-strict-practice  # 非常に厳格な保護
-      accessControlPractices:
-        - rate-limit-very-strict  # 非常に厳格なレート制限
-      triggers:
-        - example3-log-trigger
-      customResponse: example3-block-response
+# Nginxの設定リロード
+reload_nginx_config() {
+    if docker ps | grep -q mwd-nginx; then
+        echo "  🔄 Nginxの設定をリロード中..."
+        docker exec mwd-nginx nginx -s reload 2>&1 || {
+            echo "  ⚠️  警告: Nginxの設定リロードに失敗しました"
+            return 1
+        }
+        echo "  ✅ Nginxの設定リロード完了"
+    fi
+}
 ```
 
-**注意**: 
-- `host`フィールドでFQDNを指定します（`server_name`と一致させる必要があります）
-- `www.example1.com`も含める場合は、別の`specificRules`エントリを追加するか、同じエントリに複数のFQDNを指定する方法を検討します
-- パスを含めることも可能（例: `"example1.com/admin"`）
+#### 5.4 管理APIエンドポイント仕様
 
-#### practices定義（参考）
+##### GET /engine/v1/config
 
-実際の運用では、`threatPreventionPractices`や`accessControlPractices`で参照されるプラクティス定義も必要です。これらは別ファイルまたは同じファイル内で定義できます。
+**認証**: APIトークン（`Authorization: Bearer <token>`）
 
-```yaml
-# プラクティス定義の例（参考）
-practices:
-  webapp-default-practice:
-    # デフォルトのWAF保護ルール
-    enabled: true
-    
-  webapp-strict-practice:
-    # 厳格なWAF保護ルール
-    enabled: true
-    sql_injection_protection: strict
-    xss_protection: strict
-    
-  rate-limit-default:
-    max_requests_per_minute: 100
-    
-  rate-limit-strict:
-    max_requests_per_minute: 50
-    
-  rate-limit-relaxed:
-    max_requests_per_minute: 200
+**レスポンス形式**:
+
+```json
+{
+  "version": "1.0.0-20240101-120000",
+  "default_mode": "detect-learn",
+  "fqdns": [
+    {
+      "fqdn": "example1.com",
+      "is_active": true,
+      "backend_host": "backend1",
+      "backend_port": 3000,
+      "waf_mode": "prevent-learn",
+      "threat_prevention_practice": "webapp-strict-practice",
+      "access_control_practice": "rate-limit-strict",
+      "log_trigger": "example1-log-trigger",
+      "custom_response": "example1-block-response"
+    },
+    {
+      "fqdn": "example2.com",
+      "is_active": true,
+      "backend_host": "backend2",
+      "backend_port": 3000,
+      "waf_mode": "detect-learn",
+      "threat_prevention_practice": "webapp-default-practice",
+      "access_control_practice": "rate-limit-relaxed",
+      "log_trigger": "default-log-trigger",
+      "custom_response": null
+    }
+  ]
+}
 ```
 
-### 5. インストールスクリプト
+**レスポンスフィールド**:
+
+- `version`: 設定のバージョン番号（変更検知に使用）
+- `default_mode`: デフォルトのWAFモード
+- `fqdns`: FQDN別設定の配列
+  - `fqdn`: FQDN名
+  - `is_active`: 有効フラグ
+  - `backend_host`: バックエンドホスト名
+  - `backend_port`: バックエンドポート
+  - `waf_mode`: WAFモード（prevent-learn, detect-learn, prevent, detect, inactive）
+  - `threat_prevention_practice`: 脅威防止プラクティス（カンマ区切り）
+  - `access_control_practice`: アクセス制御プラクティス（カンマ区切り）
+  - `log_trigger`: ログトリガー（カンマ区切り）
+  - `custom_response`: カスタムレスポンス名（オプション）
+
+### 6. インストールスクリプト
 
 #### scripts/openappsec/install.sh
 
@@ -420,20 +682,6 @@ check_dependencies() {
     echo "✅ 依存関係の確認完了"
 }
 
-# OpenAppSecモジュールの確認
-check_module() {
-    echo "📋 OpenAppSec Attachment Moduleを確認中..."
-    
-    MODULE_PATH="/usr/lib/nginx/modules/ngx_cp_attachment_module.so"
-    
-    if [ ! -f "$MODULE_PATH" ]; then
-        echo "⚠️  警告: Attachment Moduleが見つかりません"
-        echo "    Dockerイメージに含まれていることを確認してください"
-    else
-        echo "✅ Attachment Moduleが見つかりました: $MODULE_PATH"
-    fi
-}
-
 # 設定ファイルの検証
 validate_config() {
     echo "📋 設定ファイルを検証中..."
@@ -443,9 +691,9 @@ validate_config() {
         exit 1
     fi
     
-    if [ ! -f "docker/openappsec/local_policy.yaml" ]; then
-        echo "❌ エラー: docker/openappsec/local_policy.yaml が見つかりません"
-        exit 1
+    if [ -z "$CONFIG_API_TOKEN" ]; then
+        echo "⚠️  警告: CONFIG_API_TOKENが設定されていません"
+        echo "   設定取得エージェントが正常に動作しない可能性があります"
     fi
     
     echo "✅ 設定ファイルの検証完了"
@@ -454,7 +702,6 @@ validate_config() {
 # メイン処理
 main() {
     check_dependencies
-    check_module
     validate_config
     
     echo ""
@@ -465,329 +712,13 @@ main() {
     echo "✅ OpenAppSecのインストールが完了しました"
     echo ""
     echo "次のステップ:"
-    echo "  1. docker-compose logs -f でログを確認"
-    echo "  2. curl http://localhost/health でヘルスチェック"
-    echo "  3. docker-compose ps でコンテナの状態を確認"
+    echo "  1. docker-compose logs -f config-agent で設定取得エージェントのログを確認"
+    echo "  2. docker-compose logs -f openappsec-agent でOpenAppSec Agentのログを確認"
+    echo "  3. curl http://localhost/health でヘルスチェック"
+    echo "  4. docker-compose ps でコンテナの状態を確認"
 }
 
 main "$@"
-```
-
-### 6. 設定スクリプト
-
-#### scripts/openappsec/configure.sh
-
-```bash
-#!/bin/bash
-
-set -e
-
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  OpenAppSec 設定スクリプト"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-
-# グローバル設定の変更
-configure_global_waf_mode() {
-    echo "📋 グローバルWAFモードを設定します"
-    echo "  1) detection (検出のみ)"
-    echo "  2) prevention (検出+ブロック)"
-    read -p "選択 (1 or 2): " choice
-    
-    case $choice in
-        1)
-            MODE="detection"
-            ;;
-        2)
-            MODE="prevention"
-            ;;
-        *)
-            echo "❌ 無効な選択です"
-            exit 1
-            ;;
-    esac
-    
-    # local_policy.yamlのdefaultセクションを更新
-    # 注意: YAMLの構造を保持する必要があるため、より高度な処理が必要
-    echo "⚠️  注意: local_policy.yamlの編集は手動で行ってください"
-    echo "    default.mode を $MODE に変更してください"
-}
-
-# FQDN別設定の変更
-configure_fqdn_waf() {
-    echo ""
-    echo "📋 FQDN別WAF設定を変更します"
-    read -p "FQDNを入力: " FQDN
-    
-    if [ -z "$FQDN" ]; then
-        echo "❌ FQDNが指定されていません"
-        exit 1
-    fi
-    
-    POLICY_FILE="docker/openappsec/local_policy.yaml"
-    
-    if [ ! -f "$POLICY_FILE" ]; then
-        echo "❌ エラー: ${POLICY_FILE} が見つかりません"
-        exit 1
-    fi
-    
-    # local_policy.yamlに該当FQDNのspecificRulesが存在するか確認
-    if ! grep -q "host:.*${FQDN}" "$POLICY_FILE"; then
-        echo "❌ エラー: ${FQDN} の設定がlocal_policy.yamlに見つかりません"
-        echo "   先に add-fqdn.sh でFQDNを追加してください"
-        exit 1
-    fi
-    
-    echo ""
-    echo "WAFモードを設定します"
-    echo "  1) detection (検出のみ)"
-    echo "  2) prevention (検出+ブロック)"
-    read -p "選択 (1 or 2): " choice
-    
-    case $choice in
-        1)
-            MODE="detection"
-            ;;
-        2)
-            MODE="prevention"
-            ;;
-        *)
-            echo "❌ 無効な選択です"
-            exit 1
-            ;;
-    esac
-    
-    # local_policy.yamlの該当FQDNのspecificRulesを更新
-    # 注意: YAMLの構造を保持する必要があるため、より高度な処理が必要
-    echo "⚠️  注意: local_policy.yamlの編集は手動で行ってください"
-    echo "    ${FQDN} のspecificRules.mode を $MODE に変更してください"
-}
-
-# メイン処理
-main() {
-    echo "設定を変更する対象を選択してください"
-    echo "  1) グローバル設定"
-    echo "  2) FQDN別設定"
-    read -p "選択 (1 or 2): " target
-    
-    case $target in
-        1)
-            configure_global_waf_mode
-            ;;
-        2)
-            configure_fqdn_waf
-            ;;
-        *)
-            echo "❌ 無効な選択です"
-            exit 1
-            ;;
-    esac
-    
-    echo ""
-    echo "🔄 設定を反映するためにコンテナを再起動しますか？ (y/n)"
-    read -p "> " restart
-    
-    if [ "$restart" = "y" ]; then
-        docker-compose -f docker/docker-compose.yml restart openappsec-agent nginx
-        echo "✅ コンテナを再起動しました"
-    fi
-}
-
-main "$@"
-```
-
-### 6-1. FQDN追加スクリプト
-
-#### scripts/openappsec/add-fqdn.sh
-
-```bash
-#!/bin/bash
-
-set -e
-
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  FQDN追加スクリプト"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-
-# FQDNの入力
-read -p "追加するFQDN: " FQDN
-
-if [ -z "$FQDN" ]; then
-    echo "❌ エラー: FQDNが指定されていません"
-    exit 1
-fi
-
-# FQDNのバリデーション（簡易版）
-if ! [[ "$FQDN" =~ ^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$ ]]; then
-    echo "❌ エラー: 無効なFQDN形式です"
-    exit 1
-fi
-
-# バックエンド情報の入力
-read -p "バックエンドホスト名 (例: backend1): " BACKEND_HOST
-read -p "バックエンドポート (デフォルト: 3000): " BACKEND_PORT
-BACKEND_PORT=${BACKEND_PORT:-3000}
-
-# WAF設定の選択
-echo ""
-echo "WAFモードを選択してください"
-echo "  1) detection (検出のみ)"
-echo "  2) prevention (検出+ブロック)"
-read -p "選択 (1 or 2): " waf_choice
-
-case $waf_choice in
-    1)
-        WAF_MODE="detection"
-        ;;
-    2)
-        WAF_MODE="prevention"
-        ;;
-    *)
-        echo "❌ 無効な選択です"
-        exit 1
-        ;;
-esac
-
-# Nginx設定ファイルの作成
-NGINX_CONF="docker/nginx/conf.d/${FQDN}.conf"
-cat > "$NGINX_CONF" << EOF
-server {
-    listen 80;
-    server_name ${FQDN} www.${FQDN};
-
-    # OpenAppSecによるリクエストインターセプト
-    location / {
-        # OpenAppSecによる検査を有効化（FQDN別設定を適用）
-        openappsec_inspect on;
-        openappsec_fqdn ${FQDN};
-        
-        # バックエンドへのプロキシ
-        proxy_pass http://${BACKEND_HOST}:${BACKEND_PORT};
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-
-    # ヘルスチェックエンドポイント（OpenAppSecをバイパス）
-    location /health {
-        access_log off;
-        return 200 "healthy\n";
-        add_header Content-Type text/plain;
-    }
-}
-EOF
-
-echo "✅ Nginx設定ファイルを作成しました: ${NGINX_CONF}"
-
-# local_policy.yamlにFQDN設定を追加
-POLICY_FILE="docker/openappsec/local_policy.yaml"
-
-if [ ! -f "$POLICY_FILE" ]; then
-    echo "❌ エラー: ${POLICY_FILE} が見つかりません"
-    echo "   先にlocal_policy.yamlを作成してください"
-    exit 1
-fi
-
-# local_policy.yamlにspecificRulesエントリを追加
-# 注意: この処理は簡易版です。実際の運用ではYAMLパーサーを使用することを推奨
-cat >> "$POLICY_FILE" << EOF
-
-    # ${FQDN}用の設定（自動生成）
-    - host: "${FQDN}"
-      name: ${FQDN//\./-}-rule
-      mode: ${WAF_MODE}-learn
-      threatPreventionPractices:
-        - webapp-default-practice
-      accessControlPractices:
-        - rate-limit-default
-      triggers:
-        - default-log-trigger
-EOF
-
-echo "✅ local_policy.yamlに${FQDN}の設定を追加しました"
-echo "⚠️  注意: YAMLの構文を確認し、必要に応じて手動で調整してください"
-
-echo ""
-echo "🔄 設定を反映するためにコンテナを再起動しますか？ (y/n)"
-read -p "> " restart
-
-if [ "$restart" = "y" ]; then
-    docker-compose -f docker/docker-compose.yml restart openappsec-agent nginx
-    echo "✅ コンテナを再起動しました"
-fi
-
-echo ""
-echo "✅ FQDN ${FQDN} の追加が完了しました"
-```
-
-### 6-2. FQDN削除スクリプト
-
-#### scripts/openappsec/remove-fqdn.sh
-
-```bash
-#!/bin/bash
-
-set -e
-
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  FQDN削除スクリプト"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-
-# FQDNの入力
-read -p "削除するFQDN: " FQDN
-
-if [ -z "$FQDN" ]; then
-    echo "❌ エラー: FQDNが指定されていません"
-    exit 1
-fi
-
-# 確認
-echo ""
-echo "⚠️  以下のファイルが削除/変更されます:"
-echo "  - docker/nginx/conf.d/${FQDN}.conf"
-echo "  - docker/openappsec/local_policy.yaml (${FQDN}の設定を削除)"
-echo ""
-read -p "本当に削除しますか？ (yes/no): " confirm
-
-if [ "$confirm" != "yes" ]; then
-    echo "❌ 削除をキャンセルしました"
-    exit 0
-fi
-
-# ファイルの削除
-NGINX_CONF="docker/nginx/conf.d/${FQDN}.conf"
-POLICY_FILE="docker/openappsec/local_policy.yaml"
-
-if [ -f "$NGINX_CONF" ]; then
-    rm "$NGINX_CONF"
-    echo "✅ Nginx設定ファイルを削除しました: ${NGINX_CONF}"
-else
-    echo "⚠️  警告: ${NGINX_CONF} が見つかりません"
-fi
-
-# local_policy.yamlから該当FQDNの設定を削除
-if [ -f "$POLICY_FILE" ]; then
-    # 簡易的な削除（実際の運用ではYAMLパーサーを使用することを推奨）
-    echo "⚠️  注意: local_policy.yamlから${FQDN}の設定を手動で削除してください"
-    echo "    host: \"${FQDN}\" を含むspecificRulesエントリを削除してください"
-else
-    echo "⚠️  警告: ${POLICY_FILE} が見つかりません"
-fi
-
-echo ""
-echo "🔄 設定を反映するためにコンテナを再起動しますか？ (y/n)"
-read -p "> " restart
-
-if [ "$restart" = "y" ]; then
-    docker-compose -f docker/docker-compose.yml restart openappsec-agent nginx
-    echo "✅ コンテナを再起動しました"
-fi
-
-echo ""
-echo "✅ FQDN ${FQDN} の削除が完了しました"
 ```
 
 ### 7. ヘルスチェックスクリプト
@@ -844,6 +775,26 @@ check_agent() {
     fi
 }
 
+# 設定取得エージェントのヘルスチェック
+check_config_agent() {
+    echo "📋 設定取得エージェントの状態を確認中..."
+    
+    if docker-compose -f docker/docker-compose.yml ps config-agent | grep -q "Up"; then
+        echo "✅ 設定取得エージェント: 実行中"
+        
+        # ログからエラーを確認
+        if docker-compose -f docker/docker-compose.yml logs --tail=50 config-agent | grep -q "❌"; then
+            echo "⚠️  警告: 設定取得エージェントのログにエラーが見つかりました"
+            docker-compose -f docker/docker-compose.yml logs --tail=10 config-agent | grep "❌"
+        else
+            echo "✅ 設定取得エージェント: 正常"
+        fi
+    else
+        echo "❌ 設定取得エージェント: 停止中"
+        return 1
+    fi
+}
+
 # 共有メモリの確認
 check_shared_memory() {
     echo "📋 共有メモリの状態を確認中..."
@@ -856,6 +807,21 @@ check_shared_memory() {
     fi
 }
 
+# 設定ファイルの確認
+check_config_files() {
+    echo "📋 設定ファイルの状態を確認中..."
+    
+    if [ -f "docker/openappsec/local_policy.yaml" ]; then
+        echo "✅ OpenAppSec設定ファイル: 存在"
+    else
+        echo "⚠️  警告: OpenAppSec設定ファイルが見つかりません"
+    fi
+    
+    local fqdn_count
+    fqdn_count=$(find docker/nginx/conf.d -name "*.conf" 2>/dev/null | wc -l)
+    echo "✅ Nginx設定ファイル数: ${fqdn_count}"
+}
+
 # メイン処理
 main() {
     check_nginx
@@ -864,10 +830,14 @@ main() {
     check_agent
     AGENT_STATUS=$?
     
+    check_config_agent
+    CONFIG_AGENT_STATUS=$?
+    
     check_shared_memory
+    check_config_files
     
     echo ""
-    if [ $NGINX_STATUS -eq 0 ] && [ $AGENT_STATUS -eq 0 ]; then
+    if [ $NGINX_STATUS -eq 0 ] && [ $AGENT_STATUS -eq 0 ] && [ $CONFIG_AGENT_STATUS -eq 0 ]; then
         echo "✅ すべてのコンポーネントが正常に動作しています"
         exit 0
     else
@@ -887,6 +857,8 @@ main "$@"
    ```bash
    mkdir -p docker/nginx/conf.d
    mkdir -p docker/openappsec
+   mkdir -p config-agent/lib
+   mkdir -p config-agent/config
    mkdir -p scripts/openappsec
    ```
 
@@ -895,39 +867,39 @@ main "$@"
 
 3. **Nginx設定ファイルの作成**
    - `docker/nginx/nginx.conf` を作成
-   - FQDN別設定ファイルのテンプレートを作成
 
-4. **OpenAppSec Agent設定の作成**
-   - `docker/openappsec/local_policy.yaml` を作成
-   - `default`ポリシーと`specificRules`でFQDN別設定を定義
+4. **設定取得エージェントの実装**
+   - `config-agent/config-agent.sh` を実装
+   - `config-agent/lib/api-client.sh` を実装
+   - `config-agent/lib/policy-generator.sh` を実装
+   - `config-agent/lib/nginx-config-generator.sh` を実装
+   - `config-agent/lib/config-generator.sh` を実装
 
 ### Phase 2: スクリプト実装
 
 1. **インストールスクリプト**
    - `scripts/openappsec/install.sh` を実装
 
-2. **設定スクリプト**
-   - `scripts/openappsec/configure.sh` を実装（グローバル/FQDN別対応）
+2. **ヘルスチェックスクリプト**
+   - `scripts/openappsec/health-check.sh` を実装（設定取得エージェント対応）
 
-3. **FQDN管理スクリプト**
-   - `scripts/openappsec/add-fqdn.sh` を実装
-   - `scripts/openappsec/remove-fqdn.sh` を実装
-
-4. **ヘルスチェックスクリプト**
-   - `scripts/openappsec/health-check.sh` を実装（FQDN別チェック対応）
+3. **起動スクリプト**
+   - `scripts/openappsec/start-config-agent.sh` を実装
 
 ### Phase 3: テスト・検証
 
 1. **ローカル環境でのテスト**
    - Docker Composeで起動
+   - 設定取得エージェントの動作確認
    - 複数FQDNの追加テスト
    - 各FQDNのヘルスチェックの実行
-   - ログの確認（FQDN別ログの確認）
+   - ログの確認
 
 2. **統合テスト**
    - 実際のHTTPリクエストでの動作確認（複数FQDN）
    - FQDN別WAF設定の検証
    - FQDN別のブロック/許可動作の確認
+   - 設定変更時の動的更新の確認
    - パフォーマンステスト（複数FQDN同時アクセス）
 
 ## 考慮事項
@@ -937,19 +909,20 @@ main "$@"
 - **共有メモリサイズ**: 初期は10MB、FQDN数に応じて調整（1FQDNあたり約2-3MBを目安）
 - **Worker Process数**: Nginxのworker_processesを適切に設定
 - **キャッシュサイズ**: Agentのキャッシュサイズを調整可能に
-- **FQDN別キャッシュ**: 各FQDNの設定をキャッシュして高速化
+- **ポーリング間隔**: デフォルト5分間隔、必要に応じて調整可能
 
 ### セキュリティ
 
-- **モード選択**: 初期は`detection`モードで動作確認後、`prevention`に移行
+- **APIトークン認証**: 設定取得時はAPIトークンで認証
+- **モード選択**: 初期は`detect-learn`モードで動作確認後、`prevent-learn`に移行
 - **FQDN別セキュリティポリシー**: 各FQDNの特性に応じたセキュリティレベルを設定
 - **ログ管理**: セキュリティログの適切な管理（FQDN別ログも可能）
 - **設定の保護**: 設定ファイルの権限管理
 
 ### 運用
 
-- **FQDN管理**: `add-fqdn.sh`と`remove-fqdn.sh`を使用してFQDNを管理
-- **設定変更**: `configure.sh`でグローバル設定またはFQDN別設定を変更
+- **設定管理**: 管理画面からFQDN設定を変更すると、設定取得エージェントが自動的に反映
+- **設定変更の反映時間**: 最大5分（ポーリング間隔）
 - **ログローテーション**: NginxとAgentのログローテーション設定（FQDN別ログも考慮）
 - **モニタリング**: ヘルスチェックとアラートの設定（FQDN別モニタリングも可能）
 - **アップデート**: OpenAppSecの定期的なアップデート
@@ -958,7 +931,7 @@ main "$@"
 
 - **設定ファイルの管理**: FQDNごとに設定ファイルを分離して管理
 - **Nginx設定の再読み込み**: 新しいFQDNを追加した場合は`nginx -s reload`で反映
-- **Agent設定の再読み込み**: FQDN設定を変更した場合はAgentの再起動が必要
+- **Agent設定の再読み込み**: FQDN設定を変更した場合はAgentの設定リロードが必要
 - **ログの分離**: FQDN別にログを分離する場合は、ログ設定を調整
 - **パフォーマンス**: FQDN数が増えると共有メモリの使用量が増加するため、適切にサイズを調整
 
@@ -979,19 +952,29 @@ main "$@"
    - ネットワーク設定の確認
    - ログの確認
 
-4. **特定のFQDNでWAFが動作しない**
+4. **設定取得エージェントが動作しない**
+   - `CONFIG_API_TOKEN`が設定されているか確認
+   - `CONFIG_API_URL`が正しいか確認
+   - ログを確認（`docker-compose logs config-agent`）
+
+5. **設定が反映されない**
+   - 設定取得エージェントのログを確認
+   - バージョン番号が更新されているか確認
+   - 設定ファイルが正しく生成されているか確認
+
+6. **特定のFQDNでWAFが動作しない**
    - `local_policy.yaml`の`specificRules`に該当FQDNの設定が存在するか確認
    - Nginx設定ファイル（`conf.d/{fqdn}.conf`）の`server_name`が正しいか確認
    - AgentログでFQDNが正しく認識されているか確認
    - `local_policy.yaml`のYAML構文エラーを確認
 
-5. **FQDN別設定が反映されない**
+7. **FQDN別設定が反映されない**
    - `local_policy.yaml`の`specificRules`に該当FQDNのエントリが存在するか確認
    - `host`フィールドの値が`server_name`と一致しているか確認
    - YAML構文エラーを確認（インデント、コロン、引用符など）
    - Agentコンテナの再起動を実行
 
-6. **複数FQDNでパフォーマンスが低下**
+8. **複数FQDNでパフォーマンスが低下**
    - 共有メモリサイズの増加を検討
    - Worker Process数の調整
    - Agentのキャッシュサイズの調整
@@ -1002,6 +985,8 @@ main "$@"
 - [OpenAppSec公式ドキュメント](https://docs.openappsec.io/)
 - [NGINX Shared Memory Zones](https://nginx.org/en/docs/http/ngx_http_core_module.html#variables)
 - [OpenAppSec NGINX統合ガイド](https://docs.openappsec.io/deployment-and-upgrade/load-the-attachment-in-proxy-configuration)
+- MrWebDefence-Design/docs/DESIGN.md - 詳細設計書
+- MrWebDefence-Design/docs/EPIC_TASK_DESIGN.md - Epic・タスク設計書
 
 ## 次のステップ
 
