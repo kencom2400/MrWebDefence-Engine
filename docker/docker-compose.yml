@@ -15,6 +15,7 @@ services:
       - "443:443"
     depends_on:
       - openappsec-agent
+      - config-agent
     networks:
       - mwd-network
     # IPC設定: 共有メモリ通信のため重要
@@ -44,6 +45,40 @@ services:
       - mwd-network
     # IPC設定: 共有メモリ通信のため重要
     ipc: host
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  config-agent:
+    # 設定取得エージェント
+    image: alpine:latest
+    container_name: mwd-config-agent
+    volumes:
+      # 設定取得エージェントのスクリプト
+      - ../config-agent:/app/config-agent:ro
+      # 出力先: OpenAppSec設定ファイル
+      - ./openappsec:/app/output/openappsec:rw
+      # 出力先: Nginx設定ファイル
+      - ./nginx/conf.d:/app/output/nginx/conf.d:rw
+      # Docker Composeファイル（Nginxリロード用）
+      - ./docker-compose.yml:/app/docker/docker-compose.yml:ro
+    environment:
+      - CONFIG_API_URL=${CONFIG_API_URL:-http://config-api:8080}
+      - CONFIG_API_TOKEN=${CONFIG_API_TOKEN}
+      - POLLING_INTERVAL=${POLLING_INTERVAL:-300}
+      - CACHE_TTL=${CACHE_TTL:-300}
+      - OUTPUT_DIR=/app/output
+      - NGINX_CONTAINER_NAME=mwd-nginx
+      - DOCKER_COMPOSE_FILE=/app/docker/docker-compose.yml
+    command: /bin/sh -c "apk add --no-cache curl jq bash docker-cli docker-compose && /app/config-agent/config-agent.sh"
+    networks:
+      - mwd-network
+    depends_on:
+      - nginx
+      - openappsec-agent
     restart: unless-stopped
     logging:
       driver: "json-file"
