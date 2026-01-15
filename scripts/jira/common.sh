@@ -4,9 +4,17 @@
 # このファイルは他のJiraスクリプトからsourceして使用します
 
 # 設定ファイルの読み込み
+# 優先順位: config.local.sh > config.sh
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "${SCRIPT_DIR}/config.sh" ]; then
+if [ -f "${SCRIPT_DIR}/config.local.sh" ]; then
+  source "${SCRIPT_DIR}/config.local.sh"
+elif [ -f "${SCRIPT_DIR}/config.sh" ]; then
   source "${SCRIPT_DIR}/config.sh"
+fi
+
+# JIRA_BASE_URLのデフォルト値設定（設定ファイルで未設定の場合）
+if [ -z "$JIRA_BASE_URL" ]; then
+  export JIRA_BASE_URL='https://kencom2400.atlassian.net'
 fi
 
 # 認証情報の確認
