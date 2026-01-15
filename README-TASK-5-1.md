@@ -24,6 +24,10 @@ cd /Users/kencom/github/MrWebDefence-Engine
 ### 2. 全サービスを起動
 
 ```bash
+# 方法1: サービス管理スクリプトを使用（推奨）
+./scripts/openappsec/start.sh
+
+# 方法2: 直接docker-composeを使用
 cd docker
 docker-compose up -d
 ```
@@ -73,6 +77,12 @@ config-agent/
 
 scripts/openappsec/
 ├── install.sh                   # インストールスクリプト
+├── service.sh                   # サービス管理スクリプト（メイン）
+├── start.sh                     # サービス起動（ショートカット）
+├── stop.sh                      # サービス停止（ショートカット）
+├── restart.sh                   # サービス再起動（ショートカット）
+├── status.sh                    # サービス状態表示（ショートカット）
+├── logs.sh                      # ログ表示（ショートカット）
 ├── health-check.sh              # ヘルスチェック
 ├── start-config-agent.sh        # ConfigAgent起動スクリプト
 ├── test-phase1.sh              # Phase 1動作確認
@@ -83,10 +93,40 @@ scripts/openappsec/
 
 ## 使用方法
 
+### サービス管理
+
+```bash
+# 全サービスを起動
+./scripts/openappsec/start.sh
+
+# 全サービスを停止
+./scripts/openappsec/stop.sh
+
+# 全サービスを再起動
+./scripts/openappsec/restart.sh
+
+# サービス状態を確認
+./scripts/openappsec/status.sh
+
+# ログを表示（最新50行）
+./scripts/openappsec/logs.sh
+
+# ログをリアルタイム表示
+./scripts/openappsec/logs.sh -f
+
+# 特定のサービスのみ操作
+./scripts/openappsec/start.sh nginx
+./scripts/openappsec/stop.sh config-agent
+./scripts/openappsec/logs.sh nginx openappsec-agent
+
+# 詳細な使用方法
+./scripts/openappsec/service.sh help
+```
+
 ### 基本動作（ConfigAgentなし）
 
 1. 手動で設定ファイルを編集
-2. Docker Composeでサービスを再起動
+2. サービスを再起動
 
 ```bash
 # 設定ファイルを編集
@@ -94,8 +134,7 @@ vim docker/openappsec/local_policy.yaml
 vim docker/nginx/conf.d/test.example.com.conf
 
 # サービスを再起動
-cd docker
-docker-compose restart nginx openappsec-agent
+./scripts/openappsec/restart.sh nginx openappsec-agent
 ```
 
 ### 動的設定更新（ConfigAgent使用）
