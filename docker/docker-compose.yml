@@ -63,8 +63,8 @@ services:
       - ./openappsec:/app/output/openappsec:rw
       # 出力先: Nginx設定ファイル
       - ./nginx/conf.d:/app/output/nginx/conf.d:rw
-      # Docker Composeファイル（Nginxリロード用）
-      - ./docker-compose.yml:/app/docker/docker-compose.yml:ro
+      # Dockerソケット（Nginxリロード用）
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - CONFIG_API_URL=${CONFIG_API_URL:-http://config-api:8080}
       - CONFIG_API_TOKEN=${CONFIG_API_TOKEN}
@@ -72,8 +72,7 @@ services:
       - CACHE_TTL=${CACHE_TTL:-300}
       - OUTPUT_DIR=/app/output
       - NGINX_CONTAINER_NAME=mwd-nginx
-      - DOCKER_COMPOSE_FILE=/app/docker/docker-compose.yml
-    command: /bin/sh -c "apk add --no-cache curl jq bash docker-cli docker-compose && /app/config-agent/config-agent.sh"
+    command: /bin/sh -c "apk add --no-cache curl jq bash docker-cli && /app/config-agent/config-agent.sh"
     networks:
       - mwd-network
     depends_on:
