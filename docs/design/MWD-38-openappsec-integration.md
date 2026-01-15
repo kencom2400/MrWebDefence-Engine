@@ -275,7 +275,191 @@ http {
 
 設定取得エージェントは、管理APIからFQDN設定とシグニチャグループ設定を取得し、OpenAppSec設定ファイル（`local_policy.yaml`）とNginx設定ファイルを自動生成・更新します。
 
-#### 5.2 機能
+#### 5.2 設定取得フロー
+
+##### 5.2.1 全体フロー
+
+```mermaid
+sequenceDiagram
+    participant ConfigAgent as 設定取得エージェント
+    participant Cache as ローカルキャッシュ
+    participant ConfigAPI as 管理API
+    participant ConfigService as 設定管理サービス
+    participant DB as MySQL
+    participant PolicyFile as local_policy.yaml
+    participant NginxConf as nginx/conf.d/*.conf
+    participant OpenAppSec as OpenAppSec Agent
+    participant Nginx as Nginx
+
+    Note over ConfigAgent: ポーリング開始（5分間隔）
+    
+    ConfigAgent->>Cache: キャッシュ確認
+    Cache-->>ConfigAgent: キャッシュ有効期間チェック
+    
+    alt キャッシュが有効（TTL内）
+        ConfigAgent->>ConfigAgent: スキップ（待機）
+    else キャッシュが無効または存在しない
+        ConfigAgent->>ConfigAPI: GET /engine/v1/config<br/>(Authorization: Bearer token)
+        ConfigAPI->>ConfigService: 設定取得リクエスト
+        ConfigService->>DB: FQDN設定取得<br/>(fqdnsテーブル)
+        DB-->>ConfigService: FQDN設定データ
+        ConfigService->>DB: シグニチャグループ設定取得<br/>(signature_groups, customer_signature_group_settings)
+        DB-->>ConfigService: シグニチャグループ設定データ
+        ConfigService->>ConfigService: 設定を統合・変換<br/>(OpenAppSec形式)
+        ConfigService-->>ConfigAPI: 設定データ（JSON形式）
+        ConfigAPI-->>ConfigAgent: 設定データ + バージョン番号
+        
+        ConfigAgent->>ConfigAgent: バージョン番号を確認
+        
+        alt バージョンが変更されている
+            ConfigAgent->>PolicyFile: local_policy.yaml生成<br/>(FQDN別設定を含む)
+            ConfigAgent->>NginxConf: nginx/conf.d/*.conf生成<br/>(FQDN別バーチャルホスト)
+            ConfigAgent->>Cache: キャッシュ更新
+            
+            ConfigAgent->>OpenAppSec: 設定ファイル変更通知<br/>(ファイル更新により自動検知)
+            ConfigAgent->>Nginx: nginx -s reload<br/>(設定リロード)
+            
+            OpenAppSec-->>ConfigAgent: 設定リロード完了
+            Nginx-->>ConfigAgent: リロード完了
+        else バージョンが同じ
+            ConfigAgent->>Cache: キャッシュ更新のみ
+            ConfigAgent->>ConfigAgent: スキップ（待機）
+        end
+    end
+    
+    Note over ConfigAgent: 5分待機後、次のポーリング
+```
+
+##### 5.2.2 設定取得エージェント内部フロー
+
+```mermaid
+flowchart TD
+    Start([設定取得エージェント起動]) --> Init[初期化]
+    Init --> MainLoop[メインループ開始]
+    
+    MainLoop --> CheckCache{キャッシュ確認}
+    CheckCache -->|キャッシュ有効<br/>TTL内| Wait1[5分待機]
+    Wait1 --> MainLoop
+    
+    CheckCache -->|キャッシュ無効<br/>または存在しない| FetchAPI[管理APIから設定取得]
+    FetchAPI --> CheckAPI{API呼び出し<br/>成功?}
+    
+    CheckAPI -->|失敗| Retry[60秒待機]
+    Retry --> FetchAPI
+    
+    CheckAPI -->|成功| ParseJSON[JSON解析]
+    ParseJSON --> GetVersion[バージョン番号取得]
+    GetVersion --> CompareVersion{バージョン<br/>変更あり?}
+    
+    CompareVersion -->|変更なし| UpdateCache[キャッシュ更新]
+    UpdateCache --> Wait2[5分待機]
+    Wait2 --> MainLoop
+    
+    CompareVersion -->|変更あり| GenPolicy[local_policy.yaml生成]
+    GenPolicy --> GenNginx[nginx/conf.d/*.conf生成]
+    GenNginx --> ReloadOpenAppSec[OpenAppSec設定リロード]
+    ReloadOpenAppSec --> ReloadNginx[Nginx設定リロード]
+    ReloadNginx --> UpdateCache2[キャッシュ更新]
+    UpdateCache2 --> LogSuccess[ログ出力: 設定更新完了]
+    LogSuccess --> Wait3[5分待機]
+    Wait3 --> MainLoop
+```
+
+##### 5.2.3 管理APIから設定取得までのフロー
+
+```mermaid
+flowchart LR
+    Start([設定取得エージェント]) --> Auth[APIトークン準備]
+    Auth --> Request[GET /engine/v1/config<br/>Authorization: Bearer token]
+    Request --> API[管理API]
+    
+    API --> ValidateToken{トークン<br/>検証}
+    ValidateToken -->|無効| Error1[401 Unauthorized]
+    Error1 --> End1([エラー終了])
+    
+    ValidateToken -->|有効| Service[設定管理サービス]
+    Service --> QueryFQDN[FQDN設定取得<br/>SELECT * FROM fqdns<br/>WHERE is_active = true]
+    QueryFQDN --> QuerySig[シグニチャグループ設定取得<br/>SELECT * FROM signature_groups<br/>JOIN customer_signature_group_settings]
+    QuerySig --> Merge[設定を統合・変換]
+    Merge --> Format[OpenAppSec形式に変換<br/>JSON形式]
+    Format --> Response[200 OK<br/>設定データ + バージョン]
+    Response --> End2([成功])
+```
+
+##### 5.2.4 設定ファイル生成フロー
+
+```mermaid
+flowchart TD
+    Start([設定データ取得完了]) --> ParseData[JSONデータ解析]
+    ParseData --> ExtractFQDN[FQDN設定を抽出]
+    ExtractFQDN --> GenDefault[デフォルトポリシー生成]
+    
+    GenDefault --> LoopStart{各FQDNを<br/>ループ処理}
+    LoopStart --> GetFQDNConfig[FQDN設定取得]
+    GetFQDNConfig --> GenSpecificRule[specificRulesエントリ生成<br/>host: fqdn<br/>mode: waf_mode<br/>practices: ...]
+    GenSpecificRule --> GenNginxConf[Nginx設定生成<br/>server_name: fqdn<br/>proxy_pass: backend]
+    GenNginxConf --> CheckNext{次の<br/>FQDNあり?}
+    
+    CheckNext -->|あり| LoopStart
+    CheckNext -->|なし| WritePolicy[local_policy.yaml書き込み]
+    WritePolicy --> WriteNginx[nginx/conf.d/*.conf書き込み]
+    WriteNginx --> RemoveInactive[無効化されたFQDNの<br/>設定ファイル削除]
+    RemoveInactive --> End([生成完了])
+```
+
+##### 5.2.5 設定リロードフロー
+
+```mermaid
+sequenceDiagram
+    participant ConfigAgent as 設定取得エージェント
+    participant PolicyFile as local_policy.yaml
+    participant OpenAppSec as OpenAppSec Agent
+    participant NginxConf as nginx/conf.d/*.conf
+    participant Nginx as Nginx
+
+    ConfigAgent->>PolicyFile: ファイル更新（書き込み）
+    PolicyFile-->>OpenAppSec: ファイル変更検知<br/>（inotify等）
+    OpenAppSec->>OpenAppSec: 設定ファイル再読み込み
+    OpenAppSec-->>ConfigAgent: リロード完了
+    
+    ConfigAgent->>NginxConf: ファイル更新（書き込み）
+    ConfigAgent->>Nginx: nginx -s reload<br/>（シグナル送信）
+    Nginx->>Nginx: 設定ファイル再読み込み
+    Nginx->>Nginx: 新しいワーカープロセス起動
+    Nginx->>Nginx: 古いワーカープロセス終了<br/>（グレースフルシャットダウン）
+    Nginx-->>ConfigAgent: リロード完了
+```
+
+#### 5.2.6 フロー図の説明
+
+**全体フロー（5.2.1）**:
+- 設定取得エージェントは5分間隔でポーリングを実行
+- まずローカルキャッシュを確認し、TTL（5分）内であればAPI呼び出しをスキップ
+- キャッシュが無効な場合、管理APIから設定を取得
+- バージョン番号を確認し、変更があれば設定ファイルを生成・更新
+- OpenAppSec AgentとNginxの設定をリロード
+
+**設定取得エージェント内部フロー（5.2.2）**:
+- メインループでキャッシュ確認 → API呼び出し → バージョン確認 → ファイル生成 → リロードの流れ
+- エラー時は60秒待機してリトライ
+- バージョンが同じ場合はキャッシュ更新のみでスキップ
+
+**管理APIから設定取得までのフロー（5.2.3）**:
+- APIトークンで認証
+- データベースからFQDN設定とシグニチャグループ設定を取得
+- 設定を統合・変換してOpenAppSec形式のJSONで返却
+
+**設定ファイル生成フロー（5.2.4）**:
+- JSONデータからFQDN設定を抽出
+- デフォルトポリシーと各FQDNのspecificRulesを生成
+- Nginx設定ファイルも同時に生成
+- 無効化されたFQDNの設定ファイルは削除
+
+**設定リロードフロー（5.2.5）**:
+- OpenAppSec Agentはファイル変更を自動検知してリロード
+- Nginxは`nginx -s reload`でグレースフルリロード（ダウンタイムなし）
+
+#### 5.3 機能
 
 1. **設定取得**
    - 管理APIから設定を取得（`GET /engine/v1/config`）
