@@ -34,25 +34,22 @@ generate_openappsec_policy() {
         customResponse: (.custom_response // 403)
     }' | jq -s '.')
     
-    # YAMLファイルを生成
+    # YAMLファイルを生成（公式ドキュメントのv1beta2スキーマに準拠）
     cat > "$output_file" << EOF
 apiVersion: v1beta2
-kind: LocalPolicy
-metadata:
-  name: default-policy
 policies:
   default:
     mode: ${default_mode}
-    customResponse: ${default_custom_response}
     threatPreventionPractices: []
     accessControlPractices: []
     triggers: []
-    sourceIdentifiers: {}
-    trustedSources: []
+    customResponse: ${default_custom_response}
+    sourceIdentifiers: ""
+    trustedSources: ""
     exceptions: []
 
   specificRules:
-$(echo "$specific_rules_json" | jq -r '.[] | "    - host: \"\(.host)\"\n      mode: \(.mode)\n      customResponse: \(.customResponse)\n      threatPreventionPractices: []\n      accessControlPractices: []\n      triggers: []"')
+$(echo "$specific_rules_json" | jq -r '.[] | "    - host: \"\(.host)\"\n      mode: \(.mode)\n      threatPreventionPractices: []\n      accessControlPractices: []\n      triggers: []\n      customResponse: \(.customResponse)\n      sourceIdentifiers: \"\"\n      trustedSources: \"\"\n      exceptions: []"')
 EOF
     
     # YAML構文の検証（yqまたはpythonを使用）

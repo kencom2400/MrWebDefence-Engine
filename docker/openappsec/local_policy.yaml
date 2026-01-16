@@ -1,40 +1,50 @@
 apiVersion: v1beta2
-kind: LocalPolicy
-metadata:
-  name: default-policy
 policies:
   default:
     mode: detect-learn
-    customResponse: 403
+    # プラクティスは名前で参照（空配列でも動作するが、定義があれば名前で指定）
     threatPreventionPractices: []
     accessControlPractices: []
     triggers: []
-    sourceIdentifiers: {}
-    trustedSources: []
+    customResponse: 403
+    sourceIdentifiers: ""
+    trustedSources: ""
     exceptions: []
 
   specificRules:
     - host: "test.example.com"
       mode: detect-learn
-      customResponse: 403
       threatPreventionPractices: []
       accessControlPractices: []
       triggers: []
+      customResponse: 403
+      sourceIdentifiers: ""
+      trustedSources: ""
+      exceptions: []
     - host: "example1.com"
       mode: detect-learn
-      customResponse: 403
       threatPreventionPractices: []
       accessControlPractices: []
       triggers: []
+      customResponse: 403
+      sourceIdentifiers: ""
+      trustedSources: ""
+      exceptions: []
     - host: "example2.com"
       mode: detect-learn
-      customResponse: 403
       threatPreventionPractices: []
       accessControlPractices: []
       triggers: []
+      customResponse: 403
+      sourceIdentifiers: ""
+      trustedSources: ""
+      exceptions: []
     - host: "example3.com"
       mode: detect-learn
-      customResponse: 403
       threatPreventionPractices: []
       accessControlPractices: []
       triggers: []
+      customResponse: 403
+      sourceIdentifiers: ""
+      trustedSources: ""
+      exceptions: []
