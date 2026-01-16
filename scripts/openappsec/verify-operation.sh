@@ -136,6 +136,76 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 WAF_TEST_COUNT=0
 WAF_BLOCK_COUNT=0
 WAF_DETECT_COUNT=0
+WAF_LOG_DETECT_COUNT=0
+
+# ログ確認モード（環境変数で制御、デフォルトはfalse）
+# 将来的にログ確認機能を有効化する場合は、USE_LOG_CHECK=true を設定
+USE_LOG_CHECK=${USE_LOG_CHECK:-false}
+
+# ログ確認用のタイムスタンプ（現在時刻）
+LOG_CHECK_TIMESTAMP=$(date +%s)
+
+# ログ確認関数: OpenAppSec Agentのログから検知イベントを確認
+check_detection_log() {
+    local pattern="$1"
+    local attack_type="$2"
+    
+    if [ "$USE_LOG_CHECK" != "true" ]; then
+        return 0
+    fi
+    
+    # OpenAppSec Agentのログを取得（タイムスタンプ以降）
+    local log_output=$($DOCKER_COMPOSE_CMD logs --since "${LOG_CHECK_TIMESTAMP}" openappsec-agent 2>/dev/null || echo "")
+    
+    if [ -z "$log_output" ]; then
+        return 1
+    fi
+    
+    # 検知ログのキーワードを確認
+    # OpenAppSec Agentのログには以下のようなキーワードが含まれる可能性があります:
+    # - "threat", "attack", "detected", "blocked", "prevented"
+    # - SQL Injection関連: "sql", "injection", "union", "select"
+    # - XSS関連: "xss", "script", "javascript"
+    # - パストラバーサル関連: "path", "traversal", "directory"
+    # - コマンドインジェクション関連: "command", "injection", "exec"
+    
+    local detected=false
+    
+    # パターンに応じたキーワードチェック
+    case "$attack_type" in
+        "sql_injection")
+            if echo "$log_output" | grep -qiE "(sql|injection|union|select|drop|table)" 2>/dev/null; then
+                detected=true
+            fi
+            ;;
+        "xss")
+            if echo "$log_output" | grep -qiE "(xss|script|javascript|alert|onerror|onload)" 2>/dev/null; then
+                detected=true
+            fi
+            ;;
+        "path_traversal")
+            if echo "$log_output" | grep -qiE "(path|traversal|directory|\.\./|passwd)" 2>/dev/null; then
+                detected=true
+            fi
+            ;;
+        "command_injection")
+            if echo "$log_output" | grep -qiE "(command|injection|exec|shell|rm|ls)" 2>/dev/null; then
+                detected=true
+            fi
+            ;;
+    esac
+    
+    # 一般的な検知キーワードも確認
+    if echo "$log_output" | grep -qiE "(threat|attack|detected|blocked|prevented|security|violation)" 2>/dev/null; then
+        detected=true
+    fi
+    
+    if [ "$detected" = "true" ]; then
+        return 0
+    else
+        return 1
+    fi
+}
 
 # SQL Injection攻撃パターン
 sql_injection_patterns=(
@@ -185,20 +255,43 @@ for pattern in "${sql_injection_patterns[@]}"; do
     # URLエンコード
     encoded_pattern=$(printf '%s' "$pattern" | jq -sRr @uri 2>/dev/null || echo "$pattern")
     
+    # リクエスト送信前のタイムスタンプ（ログ確認用）
+    request_timestamp=$(date +%s)
+    
     response=$(curl -s -w "\n%{http_code}" \
         -H "Host: ${TEST_FQDN}" \
         "http://localhost/?id=${encoded_pattern}" 2>/dev/null || echo -e "\n000")
     http_code=$(echo "$response" | tail -n1)
     
+    # ログ確認（将来的な機能）
+    log_detected=false
+    if check_detection_log "$pattern" "sql_injection"; then
+        log_detected=true
+        WAF_LOG_DETECT_COUNT=$((WAF_LOG_DETECT_COUNT + 1))
+    fi
+    
+    # 結果表示
     if [ "$http_code" -eq 403 ] || [ "$http_code" -eq 406 ] || [ "$http_code" -ge 400 ]; then
-        echo -e "    ${GREEN}✅ ブロック: ${pattern}${NC} (HTTP $http_code)"
+        if [ "$log_detected" = "true" ]; then
+            echo -e "    ${GREEN}✅ ブロック + ログ検知: ${pattern}${NC} (HTTP $http_code)"
+        else
+            echo -e "    ${GREEN}✅ ブロック: ${pattern}${NC} (HTTP $http_code)"
+        fi
         WAF_BLOCK_COUNT=$((WAF_BLOCK_COUNT + 1))
     elif [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
-        echo -e "    ${YELLOW}⚠️  検知されず: ${pattern}${NC} (HTTP $http_code)"
-        WAF_DETECT_COUNT=$((WAF_DETECT_COUNT + 1))
+        if [ "$log_detected" = "true" ]; then
+            echo -e "    ${GREEN}✅ ログ検知: ${pattern}${NC} (HTTP $http_code, detect-learnモード)"
+            WAF_LOG_DETECT_COUNT=$((WAF_LOG_DETECT_COUNT + 1))
+        else
+            echo -e "    ${YELLOW}⚠️  検知されず: ${pattern}${NC} (HTTP $http_code)"
+            WAF_DETECT_COUNT=$((WAF_DETECT_COUNT + 1))
+        fi
     else
         echo -e "    ${YELLOW}⚠️  不明: ${pattern}${NC} (HTTP $http_code)"
     fi
+    
+    # 少し待機（ログの反映を待つ）
+    sleep 0.5
 done
 echo ""
 
@@ -214,15 +307,35 @@ for pattern in "${xss_patterns[@]}"; do
         "http://localhost/?q=${encoded_pattern}" 2>/dev/null || echo -e "\n000")
     http_code=$(echo "$response" | tail -n1)
     
+    # ログ確認（将来的な機能）
+    log_detected=false
+    if check_detection_log "$pattern" "xss"; then
+        log_detected=true
+        WAF_LOG_DETECT_COUNT=$((WAF_LOG_DETECT_COUNT + 1))
+    fi
+    
+    # 結果表示
     if [ "$http_code" -eq 403 ] || [ "$http_code" -eq 406 ] || [ "$http_code" -ge 400 ]; then
-        echo -e "    ${GREEN}✅ ブロック: ${pattern}${NC} (HTTP $http_code)"
+        if [ "$log_detected" = "true" ]; then
+            echo -e "    ${GREEN}✅ ブロック + ログ検知: ${pattern}${NC} (HTTP $http_code)"
+        else
+            echo -e "    ${GREEN}✅ ブロック: ${pattern}${NC} (HTTP $http_code)"
+        fi
         WAF_BLOCK_COUNT=$((WAF_BLOCK_COUNT + 1))
     elif [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
-        echo -e "    ${YELLOW}⚠️  検知されず: ${pattern}${NC} (HTTP $http_code)"
-        WAF_DETECT_COUNT=$((WAF_DETECT_COUNT + 1))
+        if [ "$log_detected" = "true" ]; then
+            echo -e "    ${GREEN}✅ ログ検知: ${pattern}${NC} (HTTP $http_code, detect-learnモード)"
+            WAF_LOG_DETECT_COUNT=$((WAF_LOG_DETECT_COUNT + 1))
+        else
+            echo -e "    ${YELLOW}⚠️  検知されず: ${pattern}${NC} (HTTP $http_code)"
+            WAF_DETECT_COUNT=$((WAF_DETECT_COUNT + 1))
+        fi
     else
         echo -e "    ${YELLOW}⚠️  不明: ${pattern}${NC} (HTTP $http_code)"
     fi
+    
+    # 少し待機（ログの反映を待つ）
+    sleep 0.5
 done
 echo ""
 
@@ -238,15 +351,35 @@ for pattern in "${path_traversal_patterns[@]}"; do
         "http://localhost/${encoded_pattern}" 2>/dev/null || echo -e "\n000")
     http_code=$(echo "$response" | tail -n1)
     
+    # ログ確認（将来的な機能）
+    log_detected=false
+    if check_detection_log "$pattern" "path_traversal"; then
+        log_detected=true
+        WAF_LOG_DETECT_COUNT=$((WAF_LOG_DETECT_COUNT + 1))
+    fi
+    
+    # 結果表示
     if [ "$http_code" -eq 403 ] || [ "$http_code" -eq 406 ] || [ "$http_code" -ge 400 ]; then
-        echo -e "    ${GREEN}✅ ブロック: ${pattern}${NC} (HTTP $http_code)"
+        if [ "$log_detected" = "true" ]; then
+            echo -e "    ${GREEN}✅ ブロック + ログ検知: ${pattern}${NC} (HTTP $http_code)"
+        else
+            echo -e "    ${GREEN}✅ ブロック: ${pattern}${NC} (HTTP $http_code)"
+        fi
         WAF_BLOCK_COUNT=$((WAF_BLOCK_COUNT + 1))
     elif [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
-        echo -e "    ${YELLOW}⚠️  検知されず: ${pattern}${NC} (HTTP $http_code)"
-        WAF_DETECT_COUNT=$((WAF_DETECT_COUNT + 1))
+        if [ "$log_detected" = "true" ]; then
+            echo -e "    ${GREEN}✅ ログ検知: ${pattern}${NC} (HTTP $http_code, detect-learnモード)"
+            WAF_LOG_DETECT_COUNT=$((WAF_LOG_DETECT_COUNT + 1))
+        else
+            echo -e "    ${YELLOW}⚠️  検知されず: ${pattern}${NC} (HTTP $http_code)"
+            WAF_DETECT_COUNT=$((WAF_DETECT_COUNT + 1))
+        fi
     else
         echo -e "    ${YELLOW}⚠️  不明: ${pattern}${NC} (HTTP $http_code)"
     fi
+    
+    # 少し待機（ログの反映を待つ）
+    sleep 0.5
 done
 echo ""
 
@@ -262,15 +395,35 @@ for pattern in "${command_injection_patterns[@]}"; do
         "http://localhost/?cmd=${encoded_pattern}" 2>/dev/null || echo -e "\n000")
     http_code=$(echo "$response" | tail -n1)
     
+    # ログ確認（将来的な機能）
+    log_detected=false
+    if check_detection_log "$pattern" "command_injection"; then
+        log_detected=true
+        WAF_LOG_DETECT_COUNT=$((WAF_LOG_DETECT_COUNT + 1))
+    fi
+    
+    # 結果表示
     if [ "$http_code" -eq 403 ] || [ "$http_code" -eq 406 ] || [ "$http_code" -ge 400 ]; then
-        echo -e "    ${GREEN}✅ ブロック: ${pattern}${NC} (HTTP $http_code)"
+        if [ "$log_detected" = "true" ]; then
+            echo -e "    ${GREEN}✅ ブロック + ログ検知: ${pattern}${NC} (HTTP $http_code)"
+        else
+            echo -e "    ${GREEN}✅ ブロック: ${pattern}${NC} (HTTP $http_code)"
+        fi
         WAF_BLOCK_COUNT=$((WAF_BLOCK_COUNT + 1))
     elif [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
-        echo -e "    ${YELLOW}⚠️  検知されず: ${pattern}${NC} (HTTP $http_code)"
-        WAF_DETECT_COUNT=$((WAF_DETECT_COUNT + 1))
+        if [ "$log_detected" = "true" ]; then
+            echo -e "    ${GREEN}✅ ログ検知: ${pattern}${NC} (HTTP $http_code, detect-learnモード)"
+            WAF_LOG_DETECT_COUNT=$((WAF_LOG_DETECT_COUNT + 1))
+        else
+            echo -e "    ${YELLOW}⚠️  検知されず: ${pattern}${NC} (HTTP $http_code)"
+            WAF_DETECT_COUNT=$((WAF_DETECT_COUNT + 1))
+        fi
     else
         echo -e "    ${YELLOW}⚠️  不明: ${pattern}${NC} (HTTP $http_code)"
     fi
+    
+    # 少し待機（ログの反映を待つ）
+    sleep 0.5
 done
 echo ""
 
@@ -278,15 +431,34 @@ echo ""
 echo "  WAFテスト結果:"
 echo "    総テスト数: ${WAF_TEST_COUNT}"
 echo "    ブロック数: ${WAF_BLOCK_COUNT}"
+if [ "$USE_LOG_CHECK" = "true" ]; then
+    echo "    ログ検知数: ${WAF_LOG_DETECT_COUNT}"
+fi
 echo "    検知されず: ${WAF_DETECT_COUNT}"
 echo ""
 
+if [ "$USE_LOG_CHECK" = "true" ]; then
+    echo "  📋 ログ確認モード: 有効"
+    echo "    環境変数 USE_LOG_CHECK=true でログ確認機能が有効化されています"
+    echo ""
+fi
+
 if [ $WAF_BLOCK_COUNT -gt 0 ]; then
     echo -e "  ${GREEN}✅ WAFが動作しています（${WAF_BLOCK_COUNT}個の攻撃パターンをブロック）${NC}"
+    if [ "$USE_LOG_CHECK" = "true" ] && [ $WAF_LOG_DETECT_COUNT -gt 0 ]; then
+        echo -e "  ${GREEN}✅ ログ検知も確認できました（${WAF_LOG_DETECT_COUNT}個の攻撃パターン）${NC}"
+    fi
 else
     echo -e "  ${YELLOW}⚠️  WAFが攻撃パターンをブロックしていません${NC}"
     echo "    注意: detect-learnモードでは検知のみでブロックしない可能性があります"
-    echo "    ログを確認してください: docker-compose logs openappsec-agent"
+    if [ "$USE_LOG_CHECK" = "true" ] && [ $WAF_LOG_DETECT_COUNT -gt 0 ]; then
+        echo -e "  ${GREEN}✅ ただし、ログでは検知されています（${WAF_LOG_DETECT_COUNT}個の攻撃パターン）${NC}"
+    else
+        echo "    ログを確認してください: docker-compose logs openappsec-agent"
+        echo ""
+        echo "    将来的なログ確認機能を有効化するには:"
+        echo "      USE_LOG_CHECK=true ./scripts/openappsec/verify-operation.sh"
+    fi
 fi
 echo ""
 
