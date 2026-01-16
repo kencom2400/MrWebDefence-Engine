@@ -54,13 +54,13 @@ MrWebDefence-Engine/
 
 2. **Docker Composeで起動**
    ```bash
-   cd /Users/kencom/github/MrWebDefence-Engine/docker
+   cd docker
    docker-compose up -d
    ```
    
    または、プロジェクトルートから：
    ```bash
-   cd /Users/kencom/github/MrWebDefence-Engine
+   # プロジェクトのルートディレクトリで実行してください
    docker-compose -f docker/docker-compose.yml up -d
    ```
 

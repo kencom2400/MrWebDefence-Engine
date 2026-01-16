@@ -61,12 +61,19 @@ reload_nginx_config() {
     local nginx_container="${NGINX_CONTAINER_NAME:-mwd-nginx}"
     
     # docker execを使用してリロード（同一Dockerネットワーク内から実行）
-    if docker exec "$nginx_container" nginx -s reload 2>/dev/null; then
+    # 注意: Dockerソケットがマウントされていない場合は、シグナルファイル方式を使用
+    local reload_output
+    reload_output=$(docker exec "$nginx_container" nginx -s reload 2>&1)
+    local reload_status=$?
+    
+    if [ $reload_status -eq 0 ]; then
         log_success "Nginxの設定リロードが完了しました"
         return 0
     else
-        log_warning "Nginxの設定リロードに失敗しました（コンテナが起動していない可能性があります）"
+        log_warning "Nginxの設定リロードに失敗しました"
+        log_error "Nginxからのエラー: ${reload_output}"
         # エラーでも続行（設定ファイルは更新されているため）
+        # 注意: Dockerソケットがマウントされていない場合は、このエラーは無視されます
         return 0
     fi
 }

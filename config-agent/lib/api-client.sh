@@ -33,7 +33,6 @@ fetch_config_from_api() {
             -X GET \
             -H "Authorization: Bearer ${token}" \
             -H "Accept: application/json" \
-            -H "Content-Type: application/json" \
             --max-time 30 \
             "$api_url" 2>&1)
         

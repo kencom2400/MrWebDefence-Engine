@@ -26,7 +26,7 @@
 ### 1. 全サービスを起動
 
 ```bash
-cd /Users/kencom/github/MrWebDefence-Engine/docker
+cd docker
 docker-compose up -d
 ```
 

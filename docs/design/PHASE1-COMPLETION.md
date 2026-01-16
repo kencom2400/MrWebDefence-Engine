@@ -59,7 +59,7 @@ docker/
 ### 1. コンテナの起動
 
 ```bash
-cd /Users/kencom/github/MrWebDefence-Engine/docker
+cd docker
 docker-compose up -d
 ```
 

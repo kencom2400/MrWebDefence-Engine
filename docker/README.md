@@ -21,7 +21,7 @@
 
 1. **このディレクトリに移動**
    ```bash
-   cd /Users/kencom/github/MrWebDefence-Engine/docker
+   cd docker
    ```
 
 2. **Docker Composeで起動**

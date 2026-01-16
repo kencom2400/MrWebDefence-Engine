@@ -6,7 +6,6 @@ ConfigAgentの動作確認用の簡単なHTTPサーバー
 
 import json
 import os
-import sys
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 

@@ -17,7 +17,7 @@ Task 5.1「OpenAppSec統合」の実装が完了しました。このドキュ�
 ### 1. インストール
 
 ```bash
-cd /Users/kencom/github/MrWebDefence-Engine
+# プロジェクトのルートディレクトリで実行してください
 ./scripts/openappsec/install.sh
 ```
 

@@ -154,12 +154,16 @@ markdown_to_adf() {
                 }]')
                 current_paragraph=""
             fi
+            # TODO: チェックボックスのADF構造を正しく実装
+            # 現在は簡易版としてテキストで表示
+            # 正しい実装では taskList と taskItem ノードを使用する必要がある
             local checkbox_text="${BASH_REMATCH[1]}"
-            content_array=$(echo "$content_array" | jq --arg text "$checkbox_text" '. + [{
+            local checkbox_state="${BASH_REMATCH[2]}"
+            content_array=$(echo "$content_array" | jq --arg text "$checkbox_text" --arg state "$checkbox_state" '. + [{
                 type: "paragraph",
                 content: [{
                     type: "text",
-                    text: ("- [x] " + $text)
+                    text: (if $state == "x" then "- [x] " else "- [ ] " end + $text)
                 }]
             }]')
         elif [ -z "$line" ]; then

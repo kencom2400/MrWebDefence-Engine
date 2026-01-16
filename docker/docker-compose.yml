@@ -1,6 +1,8 @@
 services:
   nginx:
     # OpenAppSec公式のNginxイメージ（Attachment Moduleが組み込まれている）
+    # 注意: 特定バージョンを指定することを推奨（再現性のため）
+    # 現在は動作確認のため:latestを使用
     image: ghcr.io/openappsec/nginx-attachment:latest
     platform: linux/amd64
     container_name: mwd-nginx
@@ -17,7 +19,8 @@ services:
     networks:
       - mwd-network
     # IPC設定: 共有メモリ通信のため重要
-    ipc: host
+    # 注意: ipc: hostはセキュリティリスクがあるため、共有メモリボリュームのみを使用
+    # ipc: host
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -27,6 +30,8 @@ services:
 
   openappsec-agent:
     # OpenAppSec公式のAgentイメージ
+    # 注意: 特定バージョンを指定することを推奨（再現性のため）
+    # 現在は動作確認のため:latestを使用
     image: ghcr.io/openappsec/agent:latest
     platform: linux/amd64
     container_name: mwd-openappsec-agent
@@ -43,7 +48,8 @@ services:
     networks:
       - mwd-network
     # IPC設定: 共有メモリ通信のため重要
-    ipc: host
+    # 注意: ipc: hostはセキュリティリスクがあるため、共有メモリボリュームのみを使用
+    # ipc: host
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -75,6 +81,9 @@ services:
 
   config-agent:
     # 設定取得エージェント
+    # 注意: 特定バージョンを指定することを推奨（再現性のため）
+    # 現在は動作確認のため:latestを使用
+    # TODO: カスタムイメージを作成して依存パッケージをプリインストール
     image: alpine:latest
     container_name: mwd-config-agent
     volumes:
@@ -85,7 +94,9 @@ services:
       # 出力先: Nginx設定ファイル
       - ./nginx/conf.d:/app/output/nginx/conf.d:rw
       # Dockerソケット（Nginxリロード用）
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # セキュリティ警告: Dockerソケットのマウントはセキュリティリスクがあります
+      # 本番環境では、共有ボリューム上のシグナルファイルを監視する方法を検討してください
+      # - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - CONFIG_API_URL=${CONFIG_API_URL:-http://mock-api:8080}
       - CONFIG_API_TOKEN=${CONFIG_API_TOKEN:-test-token}
