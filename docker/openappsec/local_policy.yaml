@@ -4,16 +4,8 @@ metadata:
   name: default-policy
 policies:
   default:
-    # デフォルトポリシー設定
-    # 初期は detect-learn モードで動作確認後、prevent-learn に移行
     mode: detect-learn
-    
-    # カスタムレスポンス（ブロック時のHTTPステータスコード）
     customResponse: 403
-    
-    # デフォルトのセキュリティプラクティス
-    # 基本的なWAF保護を有効化（学習モード）
-    # 注意: 実際のプラクティス定義は別途必要ですが、最小構成では空でも動作します
     threatPreventionPractices: []
     accessControlPractices: []
     triggers: []
@@ -21,32 +13,28 @@ policies:
     trustedSources: []
     exceptions: []
 
-  # FQDN別の設定（specificRules）
-  # Phase 2.2で複数FQDNの設定を追加
-  # 設定取得エージェントが自動生成するようになるため、手動設定は一時的
   specificRules:
-    # テスト用FQDN設定
     - host: "test.example.com"
       mode: detect-learn
+      customResponse: 403
       threatPreventionPractices: []
       accessControlPractices: []
       triggers: []
-      customResponse: 403
     - host: "example1.com"
       mode: detect-learn
+      customResponse: 403
       threatPreventionPractices: []
       accessControlPractices: []
       triggers: []
-      customResponse: 403
     - host: "example2.com"
       mode: detect-learn
+      customResponse: 403
       threatPreventionPractices: []
       accessControlPractices: []
       triggers: []
-      customResponse: 403
     - host: "example3.com"
       mode: detect-learn
+      customResponse: 403
       threatPreventionPractices: []
       accessControlPractices: []
       triggers: []
-      customResponse: 403
