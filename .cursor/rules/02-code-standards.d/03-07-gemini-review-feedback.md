@@ -50,19 +50,29 @@ image: ghcr.io/openappsec/nginx-attachment:latest
 
 ### 3. IPC設定
 
-**指摘**: `ipc: host`と共有メモリボリュームの両方が設定されており矛盾
+**指摘**: `ipc: host`と共有メモリボリュームの両方が設定されており矛盾、セキュリティリスク
 
 **対応**:
-- `ipc: host`を削除し、共有メモリボリュームのみを使用
-- セキュリティリスクを低減
+- **公式ドキュメントとのトレードオフ**: 公式ドキュメントでは`ipc: host`が推奨されているが、セキュリティリスクがある
+- **開発環境**: 公式ドキュメントに従って`ipc: host`を使用（動作確認のため）
+- **本番環境**: セキュリティリスクを考慮し、共有ボリュームのみを使用することを検討
+- コメントで両方の選択肢とリスクを明記
 
 ### 4. コンテナ起動時のパッケージインストール
 
 **指摘**: 毎回`apk add`を実行するのは非効率
 
 **対応**:
-- カスタムイメージを作成することをTODOコメントで明記
-- 後続タスクとして管理
+- カスタムDockerイメージを作成（`Dockerfile`を追加）
+- 依存パッケージをプリインストール
+- docker-compose.ymlで`build`ディレクティブを使用
+- 例:
+  ```dockerfile
+  FROM alpine:latest
+  RUN apk add --no-cache curl jq bash docker-cli
+  WORKDIR /app/config-agent
+  CMD ["./config-agent.sh"]
+  ```
 
 ```yaml
 # TODO: カスタムイメージを作成して依存パッケージをプリインストール
@@ -71,17 +81,27 @@ image: alpine:latest
 
 ### 5. エラーハンドリング
 
-**指摘**: エラー出力を抑制している
+**指摘**: エラー出力を抑制している、失敗時も正常終了としている
 
 **対応**:
 - エラー出力をログに記録
 - デバッグ情報を失わないようにする
+- **重要**: リロード失敗時は`return 1`でエラーを返す（設定が適用されていないため）
+- 呼び出し元で次のポーリングサイクルで再試行できるようにする
 
 ```bash
 local reload_output
 reload_output=$(docker exec "$nginx_container" nginx -s reload 2>&1)
-if [ $? -ne 0 ]; then
+local reload_status=$?
+
+if [ $reload_status -eq 0 ]; then
+    log_success "Nginxの設定リロードが完了しました"
+    return 0
+else
+    log_warning "Nginxの設定リロードに失敗しました"
     log_error "Nginxからのエラー: ${reload_output}"
+    # リロード失敗は設定が適用されていないことを意味するため、エラーとして返す
+    return 1
 fi
 ```
 

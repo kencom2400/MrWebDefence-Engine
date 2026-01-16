@@ -72,9 +72,9 @@ reload_nginx_config() {
     else
         log_warning "Nginxの設定リロードに失敗しました"
         log_error "Nginxからのエラー: ${reload_output}"
-        # エラーでも続行（設定ファイルは更新されているため）
-        # 注意: Dockerソケットがマウントされていない場合は、このエラーは無視されます
-        return 0
+        # リロード失敗は設定が適用されていないことを意味するため、エラーとして返す
+        # 呼び出し元で次のポーリングサイクルで再試行できるようにする
+        return 1
     fi
 }
 
@@ -142,7 +142,11 @@ main_loop() {
             reload_openappsec_config
             
             # Nginxの設定リロード
-            reload_nginx_config
+            if ! reload_nginx_config; then
+                log_error "Nginxの設定リロードに失敗しました。次のポーリングサイクルで再試行します"
+                sleep 60
+                continue
+            fi
             
             # バージョンを更新
             last_version="$current_version"

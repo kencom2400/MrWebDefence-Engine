@@ -20,8 +20,10 @@ services:
     networks:
       - mwd-network
     # IPC設定: 共有メモリ通信のため重要
-    # 公式ドキュメントではipc: hostが推奨されています
-    # セキュリティリスクがあるため、本番環境では共有ボリュームのみの使用を検討
+    # 公式ドキュメントではipc: hostが推奨されていますが、セキュリティリスクがあります
+    # 開発環境: 公式ドキュメントに従ってipc: hostを使用（動作確認のため）
+    # 本番環境: セキュリティリスクを考慮し、共有ボリュームのみの使用を検討
+    # 共有ボリュームのみで動作する場合は、ipc: hostをコメントアウトしてください
     ipc: host
     restart: unless-stopped
     logging:
@@ -56,8 +58,10 @@ services:
     networks:
       - mwd-network
     # IPC設定: 共有メモリ通信のため重要
-    # 公式ドキュメントではipc: hostが推奨されています
-    # セキュリティリスクがあるため、本番環境では共有ボリュームのみの使用を検討
+    # 公式ドキュメントではipc: hostが推奨されていますが、セキュリティリスクがあります
+    # 開発環境: 公式ドキュメントに従ってipc: hostを使用（動作確認のため）
+    # 本番環境: セキュリティリスクを考慮し、共有ボリュームのみの使用を検討
+    # 共有ボリュームのみで動作する場合は、ipc: hostをコメントアウトしてください
     ipc: host
     # 公式ドキュメントのコマンド
     command: /cp-nano-agent
@@ -94,7 +98,11 @@ services:
     # 設定取得エージェント
     # 注意: 特定バージョンを指定することを推奨（再現性のため）
     # 現在は動作確認のため:latestを使用
-    # TODO: カスタムイメージを作成して依存パッケージをプリインストール
+    # カスタムイメージを使用する場合（推奨）:
+    # build:
+    #   context: ../config-agent
+    #   dockerfile: Dockerfile
+    # または、依存パッケージを毎回インストール（非推奨）:
     image: alpine:latest
     container_name: mwd-config-agent
     volumes:
@@ -115,6 +123,9 @@ services:
       - CACHE_TTL=${CACHE_TTL:-300}
       - OUTPUT_DIR=/app/output
       - NGINX_CONTAINER_NAME=mwd-nginx
+    # カスタムイメージを使用する場合:
+    # command: /app/config-agent/config-agent.sh
+    # または、依存パッケージを毎回インストール（非推奨）:
     command: /bin/sh -c "apk add --no-cache curl jq bash docker-cli && /app/config-agent/config-agent.sh"
     networks:
       - mwd-network
