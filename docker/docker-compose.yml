@@ -20,8 +20,9 @@ services:
     networks:
       - mwd-network
     # IPC設定: 共有メモリ通信のため重要
-    # 注意: ipc: hostはセキュリティリスクがあるため、共有メモリボリュームのみを使用
-    # ipc: host
+    # 公式ドキュメントではipc: hostが推奨されています
+    # セキュリティリスクがあるため、本番環境では共有ボリュームのみの使用を検討
+    ipc: host
     restart: unless-stopped
     logging:
       driver: "json-file"
