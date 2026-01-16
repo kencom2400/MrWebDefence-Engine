@@ -129,10 +129,179 @@ echo "OpenAppSec Agent:"
 $DOCKER_COMPOSE_CMD logs --tail=5 openappsec-agent 2>/dev/null | tail -3 || echo "  ログを取得できませんでした"
 echo ""
 
+# 6. WAFシグニチャテスト（SQL Injection、XSSなど）
+echo -e "${BLUE}📋 6. WAFシグニチャテスト${NC}"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+WAF_TEST_COUNT=0
+WAF_BLOCK_COUNT=0
+WAF_DETECT_COUNT=0
+
+# SQL Injection攻撃パターン
+sql_injection_patterns=(
+    "' OR '1'='1"
+    "UNION SELECT * FROM users"
+    "'; DROP TABLE users--"
+    "1' OR '1'='1'--"
+    "admin'--"
+    "1' UNION SELECT NULL--"
+)
+
+# XSS攻撃パターン
+xss_patterns=(
+    "<script>alert('XSS')</script>"
+    "<img src=x onerror=alert(1)>"
+    "<svg onload=alert(1)>"
+    "javascript:alert('XSS')"
+    "<iframe src=javascript:alert(1)>"
+    "<body onload=alert('XSS')>"
+)
+
+# パストラバーサル攻撃パターン
+path_traversal_patterns=(
+    "../../../etc/passwd"
+    "..\\..\\..\\windows\\system32"
+    "....//....//etc/passwd"
+)
+
+# コマンドインジェクション攻撃パターン
+command_injection_patterns=(
+    "; ls -la"
+    "| cat /etc/passwd"
+    "&& id"
+    "; rm -rf /"
+)
+
+echo "WAFシグニチャテストを実行中..."
+echo ""
+
+# テスト用FQDN（最初の1つを使用）
+TEST_FQDN="${FQDNS[0]}"
+
+# SQL Injectionテスト
+echo "  SQL Injectionテスト:"
+for pattern in "${sql_injection_patterns[@]}"; do
+    WAF_TEST_COUNT=$((WAF_TEST_COUNT + 1))
+    # URLエンコード
+    encoded_pattern=$(printf '%s' "$pattern" | jq -sRr @uri 2>/dev/null || echo "$pattern")
+    
+    response=$(curl -s -w "\n%{http_code}" \
+        -H "Host: ${TEST_FQDN}" \
+        "http://localhost/?id=${encoded_pattern}" 2>/dev/null || echo -e "\n000")
+    http_code=$(echo "$response" | tail -n1)
+    
+    if [ "$http_code" -eq 403 ] || [ "$http_code" -eq 406 ] || [ "$http_code" -ge 400 ]; then
+        echo -e "    ${GREEN}✅ ブロック: ${pattern}${NC} (HTTP $http_code)"
+        WAF_BLOCK_COUNT=$((WAF_BLOCK_COUNT + 1))
+    elif [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+        echo -e "    ${YELLOW}⚠️  検知されず: ${pattern}${NC} (HTTP $http_code)"
+        WAF_DETECT_COUNT=$((WAF_DETECT_COUNT + 1))
+    else
+        echo -e "    ${YELLOW}⚠️  不明: ${pattern}${NC} (HTTP $http_code)"
+    fi
+done
+echo ""
+
+# XSSテスト
+echo "  XSSテスト:"
+for pattern in "${xss_patterns[@]}"; do
+    WAF_TEST_COUNT=$((WAF_TEST_COUNT + 1))
+    # URLエンコード
+    encoded_pattern=$(printf '%s' "$pattern" | jq -sRr @uri 2>/dev/null || echo "$pattern")
+    
+    response=$(curl -s -w "\n%{http_code}" \
+        -H "Host: ${TEST_FQDN}" \
+        "http://localhost/?q=${encoded_pattern}" 2>/dev/null || echo -e "\n000")
+    http_code=$(echo "$response" | tail -n1)
+    
+    if [ "$http_code" -eq 403 ] || [ "$http_code" -eq 406 ] || [ "$http_code" -ge 400 ]; then
+        echo -e "    ${GREEN}✅ ブロック: ${pattern}${NC} (HTTP $http_code)"
+        WAF_BLOCK_COUNT=$((WAF_BLOCK_COUNT + 1))
+    elif [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+        echo -e "    ${YELLOW}⚠️  検知されず: ${pattern}${NC} (HTTP $http_code)"
+        WAF_DETECT_COUNT=$((WAF_DETECT_COUNT + 1))
+    else
+        echo -e "    ${YELLOW}⚠️  不明: ${pattern}${NC} (HTTP $http_code)"
+    fi
+done
+echo ""
+
+# パストラバーサルテスト
+echo "  パストラバーサルテスト:"
+for pattern in "${path_traversal_patterns[@]}"; do
+    WAF_TEST_COUNT=$((WAF_TEST_COUNT + 1))
+    # URLエンコード
+    encoded_pattern=$(printf '%s' "$pattern" | jq -sRr @uri 2>/dev/null || echo "$pattern")
+    
+    response=$(curl -s -w "\n%{http_code}" \
+        -H "Host: ${TEST_FQDN}" \
+        "http://localhost/${encoded_pattern}" 2>/dev/null || echo -e "\n000")
+    http_code=$(echo "$response" | tail -n1)
+    
+    if [ "$http_code" -eq 403 ] || [ "$http_code" -eq 406 ] || [ "$http_code" -ge 400 ]; then
+        echo -e "    ${GREEN}✅ ブロック: ${pattern}${NC} (HTTP $http_code)"
+        WAF_BLOCK_COUNT=$((WAF_BLOCK_COUNT + 1))
+    elif [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+        echo -e "    ${YELLOW}⚠️  検知されず: ${pattern}${NC} (HTTP $http_code)"
+        WAF_DETECT_COUNT=$((WAF_DETECT_COUNT + 1))
+    else
+        echo -e "    ${YELLOW}⚠️  不明: ${pattern}${NC} (HTTP $http_code)"
+    fi
+done
+echo ""
+
+# コマンドインジェクションテスト
+echo "  コマンドインジェクションテスト:"
+for pattern in "${command_injection_patterns[@]}"; do
+    WAF_TEST_COUNT=$((WAF_TEST_COUNT + 1))
+    # URLエンコード
+    encoded_pattern=$(printf '%s' "$pattern" | jq -sRr @uri 2>/dev/null || echo "$pattern")
+    
+    response=$(curl -s -w "\n%{http_code}" \
+        -H "Host: ${TEST_FQDN}" \
+        "http://localhost/?cmd=${encoded_pattern}" 2>/dev/null || echo -e "\n000")
+    http_code=$(echo "$response" | tail -n1)
+    
+    if [ "$http_code" -eq 403 ] || [ "$http_code" -eq 406 ] || [ "$http_code" -ge 400 ]; then
+        echo -e "    ${GREEN}✅ ブロック: ${pattern}${NC} (HTTP $http_code)"
+        WAF_BLOCK_COUNT=$((WAF_BLOCK_COUNT + 1))
+    elif [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+        echo -e "    ${YELLOW}⚠️  検知されず: ${pattern}${NC} (HTTP $http_code)"
+        WAF_DETECT_COUNT=$((WAF_DETECT_COUNT + 1))
+    else
+        echo -e "    ${YELLOW}⚠️  不明: ${pattern}${NC} (HTTP $http_code)"
+    fi
+done
+echo ""
+
+# WAFテスト結果サマリー
+echo "  WAFテスト結果:"
+echo "    総テスト数: ${WAF_TEST_COUNT}"
+echo "    ブロック数: ${WAF_BLOCK_COUNT}"
+echo "    検知されず: ${WAF_DETECT_COUNT}"
+echo ""
+
+if [ $WAF_BLOCK_COUNT -gt 0 ]; then
+    echo -e "  ${GREEN}✅ WAFが動作しています（${WAF_BLOCK_COUNT}個の攻撃パターンをブロック）${NC}"
+else
+    echo -e "  ${YELLOW}⚠️  WAFが攻撃パターンをブロックしていません${NC}"
+    echo "    注意: detect-learnモードでは検知のみでブロックしない可能性があります"
+    echo "    ログを確認してください: docker-compose logs openappsec-agent"
+fi
+echo ""
+
 # 結果サマリー
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-if [ $FAIL_COUNT -eq 0 ]; then
-    echo -e "${GREEN}  ✅ 動作確認完了: すべて正常${NC}"
+if [ $FAIL_COUNT -eq 0 ] && [ $WAF_BLOCK_COUNT -gt 0 ]; then
+    echo -e "${GREEN}  ✅ 動作確認完了: すべて正常（WAF動作確認済み）${NC}"
+    exit 0
+elif [ $FAIL_COUNT -eq 0 ]; then
+    echo -e "${YELLOW}  ⚠️  動作確認完了: 基本動作は正常（WAF動作要確認）${NC}"
+    echo ""
+    echo "詳細な確認:"
+    echo "  ./scripts/openappsec/test-integration.sh"
+    echo "  ./scripts/openappsec/health-check.sh"
+    echo "  OpenAppSec Agentログ: docker-compose logs openappsec-agent"
     exit 0
 else
     echo -e "${YELLOW}  ⚠️  動作確認完了: 一部に問題があります${NC}"
