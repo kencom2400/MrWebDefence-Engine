@@ -35,17 +35,19 @@ docker-compose up -d
 ### 3. 動作確認
 
 ```bash
-# 統合テスト
+# 統合テスト（推奨：すべての確認を一度に実行）
 ./scripts/openappsec/test-integration.sh
 
 # ヘルスチェック
 ./scripts/openappsec/health-check.sh
 
 # 個別テスト
-./scripts/openappsec/test-phase1.sh
-./scripts/openappsec/test-phase2.sh
-./scripts/openappsec/test-phase3.sh
+./scripts/openappsec/test-phase1.sh  # Phase 1: 基盤構築
+./scripts/openappsec/test-phase2.sh  # Phase 2: 複数FQDN対応
+./scripts/openappsec/test-phase3.sh  # Phase 3: 設定取得エージェント
 ```
+
+詳細な動作確認手順は `docs/QUICK-START.md` を参照してください。
 
 ## 構成
 
