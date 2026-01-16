@@ -49,6 +49,13 @@ docker-compose up -d
 
 詳細な動作確認手順は `docs/QUICK-START.md` を参照してください。
 
+### 簡易動作確認
+
+```bash
+# 簡易動作確認スクリプト（推奨）
+./scripts/openappsec/verify-operation.sh
+```
+
 ## 構成
 
 ### コンテナ
