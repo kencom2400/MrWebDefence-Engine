@@ -10996,3 +10996,121 @@ extend-ignore = ["E203", "E266", "W503"]
 **参照**: PR #60 - Issue #23: CI/CDパイプラインの構築（Gemini Code Assistレビュー指摘 - 第2回）
 
 ---
+
+## 22. Gemini Code Assist レビューから学んだ観点（PR #34 OpenAppSec統合）
+
+### 22-1. Docker Compose設定のセキュリティリスク管理 🟡 Medium
+
+**学習元**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘）
+
+#### Dockerソケットのマウント
+
+**問題**: Dockerソケット（`/var/run/docker.sock`）のマウントはセキュリティリスクが高い
+
+**解決策**:
+- 開発環境ではコメントアウト
+- 本番環境では共有ボリューム上のシグナルファイルを監視する方法を検討
+- コメントでセキュリティリスクを明記
+
+```yaml
+# Dockerソケット（Nginxリロード用）
+# セキュリティ警告: Dockerソケットのマウントはセキュリティリスクがあります
+# 本番環境では、共有ボリューム上のシグナルファイルを監視する方法を検討してください
+# - /var/run/docker.sock:/var/run/docker.sock:ro
+```
+
+**参照**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘）
+
+---
+
+### 22-2. IPC設定と共有メモリの併用 🟡 Medium
+
+**学習元**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘）
+
+#### ipc: hostと共有メモリボリュームの併用
+
+**問題**: `ipc: host`と共有メモリボリュームの両方が設定されており、矛盾している可能性がある
+
+**解決策**:
+- **公式ドキュメントとのトレードオフ**: 公式ドキュメントでは`ipc: host`が推奨されているが、セキュリティリスクがある
+- **開発環境**: 公式ドキュメントに従って`ipc: host`を使用（動作確認のため）
+- **本番環境**: セキュリティリスクを考慮し、共有ボリュームのみを使用することを検討
+- コメントで両方の選択肢とリスクを明記
+
+```yaml
+# IPC設定: 共有メモリ通信のため重要
+# 公式ドキュメントではipc: hostが推奨されていますが、セキュリティリスクがあります
+# 開発環境: 公式ドキュメントに従ってipc: hostを使用（動作確認のため）
+# 本番環境: セキュリティリスクを考慮し、共有ボリュームのみの使用を検討
+# 共有ボリュームのみで動作する場合は、ipc: hostをコメントアウトしてください
+ipc: host
+```
+
+**参照**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘）
+
+---
+
+### 22-3. コンテナ起動時のパッケージインストールの効率化 🟢 Low
+
+**学習元**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘）
+
+#### 毎回のパッケージインストール
+
+**問題**: コンテナ起動時に毎回`apk add`を実行するのは非効率
+
+**解決策**:
+- カスタムDockerイメージを作成（`Dockerfile`を追加）
+- 依存パッケージをプリインストール
+- docker-compose.ymlで`build`ディレクティブを使用
+
+```dockerfile
+# Dockerfile例
+FROM alpine:latest
+RUN apk add --no-cache curl jq bash docker-cli
+WORKDIR /app/config-agent
+CMD ["./config-agent.sh"]
+```
+
+```yaml
+# docker-compose.yml
+config-agent:
+  build:
+    context: ../config-agent
+    dockerfile: Dockerfile
+  # または、依存パッケージを毎回インストール（非推奨）:
+  # image: alpine:latest
+  # command: /bin/sh -c "apk add --no-cache curl jq bash docker-cli && /app/config-agent/config-agent.sh"
+```
+
+**参照**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘）
+
+---
+
+### 22-4. SaaS管理UI対応の実装パターン 🟢 Low
+
+**学習元**: PR #34 - Task 5.1 OpenAppSec統合（SaaS管理UI対応追加）
+
+#### docker-compose.saas.ymlによる設定の分離
+
+**パターン**: ローカル管理とSaaS管理を別ファイルで管理
+
+**実装例**:
+- 基本設定: `docker-compose.yml`
+- SaaS管理用追加設定: `docker-compose.saas.yml`
+- 環境変数による切り替え: `.env`ファイル
+
+```bash
+# ローカル管理モード
+docker-compose -f docker-compose.yml up -d
+
+# SaaS管理モード
+docker-compose -f docker-compose.yml -f docker-compose.saas.yml up -d
+```
+
+**利点**:
+- 設定の分離により、管理モードの切り替えが容易
+- 既存の設定を維持しつつ、新機能を追加可能
+
+**参照**: PR #34 - Task 5.1 OpenAppSec統合（SaaS管理UI対応追加）
+
+---
