@@ -49,10 +49,12 @@ services:
       # サーバータイプ（公式ドキュメントで必須）
       - registered_server=NGINX
       # ローカルポリシーファイルを自動読み込み（変更を検知して約30秒で反映）
-      - autoPolicyLoad=true
+      # デフォルト: true（ローカル管理）
+      # SaaS管理UIを使用する場合は docker-compose.saas.yml で false に設定
+      - autoPolicyLoad=${APPSEC_AUTO_POLICY_LOAD:-true}
       # ログレベル
-      - OPENAPPSEC_LOG_LEVEL=info
-      # SaaS管理を使用する場合は以下を設定
+      - OPENAPPSEC_LOG_LEVEL=${OPENAPPSEC_LOG_LEVEL:-info}
+      # SaaS管理を使用する場合は docker-compose.saas.yml を参照
       # - AGENT_TOKEN=${APPSEC_AGENT_TOKEN}
       # - user_email=${APPSEC_USER_EMAIL}
     networks:

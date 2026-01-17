@@ -1,0 +1,63 @@
+# OpenAppSec SaaS管理UI対応版 docker-compose.yml
+# このファイルは、OpenAppSecのSaaS管理UI（my.openappsec.io）を使用する場合の設定です
+#
+# 使用方法:
+#   1. .envファイルにAPPSEC_AGENT_TOKENとAPPSEC_USER_EMAILを設定
+#   2. docker-compose -f docker-compose.yml -f docker-compose.saas.yml up -d
+#
+# 参考: https://raw.githubusercontent.com/openappsec/open-appsec-npm/main/deployment/managed-from-open-appsec-ui/docker-compose.yaml
+
+version: '3.8'
+
+services:
+  openappsec-agent:
+    # SaaS管理UIを使用する場合の追加設定
+    environment:
+      # SaaS管理用のトークン（WebUIから取得）
+      # 設定方法: my.openappsec.io にログイン → Deployment Profile → Tokenをコピー
+      - AGENT_TOKEN=${APPSEC_AGENT_TOKEN:-}
+      # ユーザーEmail（オプション、サポート・通知用）
+      - user_email=${APPSEC_USER_EMAIL:-}
+      # ローカルポリシーファイルの自動読み込み（SaaS管理の場合はfalse推奨）
+      - autoPolicyLoad=${APPSEC_AUTO_POLICY_LOAD:-false}
+    volumes:
+      # SaaS管理用のボリュームマウント（公式推奨パス）
+      # 設定ファイル（SaaS管理の場合はWebUIから管理）
+      - appsec-config:/etc/cp/conf
+      # データファイル（永続化、学習データなど）
+      - appsec-data:/etc/cp/data
+      # ログファイル
+      - appsec-logs:/var/log/nano_agent
+      # ローカルポリシー（Declarative Configurationモードの場合のみ使用）
+      - ./openappsec:/ext/appsec:ro
+    # SaaS管理の場合、コマンドにトークンを指定
+    # 参考: https://raw.githubusercontent.com/openappsec/open-appsec-npm/main/deployment/managed-from-open-appsec-ui/docker-compose.yaml
+    # 注意: 環境変数AGENT_TOKENとコマンドライン引数--tokenの両方を設定可能
+    # コマンドライン引数が優先されます
+    # 環境変数AGENT_TOKENが設定されていれば、それを使用（コマンドライン引数は不要）
+    # コマンドライン引数を使用する場合は、entrypoint.shなどで処理する必要があります
+    # ここでは環境変数AGENT_TOKENを使用する方法を採用
+    command: /cp-nano-agent
+
+volumes:
+  # SaaS管理用の永続化ボリューム
+  # 注意: これらのボリュームは docker-compose.yml の volumes セクションに追加されます
+  # 実際のディレクトリは docker/appsec-config, docker/appsec-data, docker/appsec-logs に作成されます
+  appsec-config:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./appsec-config
+  appsec-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./appsec-data
+  appsec-logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./appsec-logs
