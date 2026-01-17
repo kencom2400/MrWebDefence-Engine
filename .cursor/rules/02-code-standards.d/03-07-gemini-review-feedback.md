@@ -105,7 +105,56 @@ else
 fi
 ```
 
-### 9. DockerソケットなしでのNginxリロード機構
+### 10. Nginx設定ファイルのOpenAppSecディレクティブ
+
+**指摘**: 設計書に記載されているOpenAppSecディレクティブが欠落している
+
+**対応**:
+- 設計書（MWD-38-openappsec-integration.md）では以下のディレクティブが定義されている：
+  - `openappsec_shared_memory_zone zone=openappsec_shm:10m;`
+  - `openappsec_agent_url http://openappsec-agent:8080;`
+  - `openappsec_enabled on;`
+- 公式ドキュメントでは不要の可能性があるが、設計書との整合性を保つため、コメントで明確に説明
+- 実際の動作確認で必要に応じて有効化
+
+```nginx
+# OpenAppSec設定
+# 注意: 公式ドキュメントではこれらのディレクティブは不要かもしれませんが、
+# 設計書（MWD-38-openappsec-integration.md）では以下のディレクティブが定義されています：
+# - openappsec_agent_url http://openappsec-agent:8080;
+# - openappsec_enabled on;
+# 現在の実装では、モジュールの読み込み（load_module）のみで動作確認済みです。
+# 必要に応じて、これらのディレクティブを有効化してください。
+# openappsec_agent_url http://openappsec-agent:8080;
+# openappsec_enabled on;
+```
+
+### 11. ドキュメントと実装の整合性
+
+**指摘**: ドキュメントの記述と実装の現状が一致していない
+
+**対応**:
+- 実装が完了した場合は、ドキュメントを「未実装」から「完了」に更新
+- 定期的にドキュメントと実装の整合性を確認
+
+### 12. コードの可読性向上
+
+**指摘**: 長く複雑なコードブロックの可読性が低い
+
+**対応**:
+- `jq`の文字列結合を使用して可読性を向上
+- 複数行に分割して読みやすくする
+
+```bash
+# 修正前（1行）
+$(echo "$data" | jq -r '.[] | "    - host: \"\(.host)\"\n      mode: \(.mode)\n..."')
+
+# 修正後（複数行、jqの文字列結合を使用）
+$(echo "$data" | jq -r '.[] | 
+    "    - host: \"\(.host)\"\n" +
+    "      mode: \(.mode)\n" +
+    "      ..."')
+```
 
 **指摘**: デフォルト構成でNginxのリロード機構が失敗する重大な問題
 
@@ -175,6 +224,7 @@ cd docker
 **対応**:
 - GETリクエストからContent-Typeヘッダーを削除
 - HTTPの規約に従う
+- 注意: `Accept`ヘッダーは必要（レスポンスの形式を指定するため）
 
 ## 設計書と公式ドキュメントの乖離
 

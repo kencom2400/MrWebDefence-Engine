@@ -11161,3 +11161,58 @@ nginx:
 **参照**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘 - 第2回）
 
 ---
+
+### 22-6. 設計書と実装の整合性確認 🟡 Medium
+
+**学習元**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘 - 第3回）
+
+#### Nginx設定ファイルのOpenAppSecディレクティブ
+
+**問題**: 設計書に記載されているOpenAppSecディレクティブが実装でコメントアウトされている
+
+**解決策**:
+- 設計書（MWD-38-openappsec-integration.md）と実装の整合性を確認
+- 公式ドキュメントでは不要の可能性があるが、設計書との整合性を保つため、コメントで明確に説明
+- 実際の動作確認で必要に応じて有効化
+
+```nginx
+# OpenAppSec設定
+# 注意: 公式ドキュメントではこれらのディレクティブは不要かもしれませんが、
+# 設計書（MWD-38-openappsec-integration.md）では以下のディレクティブが定義されています：
+# - openappsec_agent_url http://openappsec-agent:8080;
+# - openappsec_enabled on;
+# 現在の実装では、モジュールの読み込み（load_module）のみで動作確認済みです。
+# 必要に応じて、これらのディレクティブを有効化してください。
+```
+
+**参照**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘 - 第3回）
+
+---
+
+### 22-7. コードの可読性向上 🟢 Low
+
+**学習元**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘 - 第3回）
+
+#### jqの文字列結合による可読性向上
+
+**問題**: 長く複雑な`jq`コマンドが読みにくい
+
+**解決策**:
+- `jq`の文字列結合（`+`）を使用して複数行に分割
+- 可読性を向上させる
+
+```bash
+# 修正前（1行）
+$(echo "$data" | jq -r '.[] | "    - host: \"\(.host)\"\n      mode: \(.mode)\n..."')
+
+# 修正後（複数行、jqの文字列結合を使用）
+$(echo "$data" | jq -r '.[] | 
+    "    - host: \"\(.host)\"\n" +
+    "      mode: \(.mode)\n" +
+    "      threatPreventionPractices: [threat-prevention-basic]\n" +
+    "      ..."')
+```
+
+**参照**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘 - 第3回）
+
+---
