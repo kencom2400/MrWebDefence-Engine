@@ -1,0 +1,4 @@
+issue_tracker: jira
+jira:
+  project_key: MWD
+  base_url: https://kencom2400.atlassian.net
