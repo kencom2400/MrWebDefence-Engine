@@ -9,6 +9,8 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      # 設定ファイル変更監視スクリプト（Dockerソケットがマウントされていない場合の代替手段）
+      - ./nginx/watch-config.sh:/usr/local/bin/watch-config.sh:ro
       # 共有メモリ: OpenAppSec AgentとのIPC通信に使用
       # 公式ドキュメント推奨のマウントポイント: /dev/shm/check-point
       - nginx-shm:/dev/shm/check-point
@@ -25,6 +27,17 @@ services:
     # 本番環境: セキュリティリスクを考慮し、共有ボリュームのみの使用を検討
     # 共有ボリュームのみで動作する場合は、ipc: hostをコメントアウトしてください
     ipc: host
+    # 設定ファイル変更監視スクリプトをバックグラウンドで起動
+    # 注意: 公式イメージのentrypointを上書きするため、nginxコマンドも明示的に実行
+    # Dockerソケットがマウントされていない場合の代替手段として使用
+    entrypoint: >
+      sh -c "
+      if [ -f /usr/local/bin/watch-config.sh ]; then
+        chmod +x /usr/local/bin/watch-config.sh &&
+        /usr/local/bin/watch-config.sh &
+      fi &&
+      exec nginx -g 'daemon off;'
+      "
     restart: unless-stopped
     logging:
       driver: "json-file"

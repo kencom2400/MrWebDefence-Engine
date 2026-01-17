@@ -11114,3 +11114,50 @@ docker-compose -f docker-compose.yml -f docker-compose.saas.yml up -d
 **参照**: PR #34 - Task 5.1 OpenAppSec統合（SaaS管理UI対応追加）
 
 ---
+
+### 22-5. DockerソケットなしでのNginxリロード機構 🟡 Medium
+
+**学習元**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘 - 第2回）
+
+#### デフォルト構成でのNginxリロード失敗問題
+
+**問題**: `config-agent`が`docker exec`を使用してNginxをリロードしようとするが、デフォルト構成ではDockerソケットがマウントされていないため失敗する
+
+**解決策**:
+1. **Dockerソケットの有無を確認**: `config-agent.sh`でDockerソケットの存在を確認
+2. **シグナルファイル方式**: Dockerソケットがマウントされていない場合、シグナルファイルを作成
+3. **Nginxコンテナ内で監視**: Nginxコンテナ内で`watch-config.sh`スクリプトがシグナルファイルを監視し、自動的にリロード
+
+```bash
+# config-agent.sh
+reload_nginx_config() {
+    local nginx_container="${NGINX_CONTAINER_NAME:-mwd-nginx}"
+    
+    if [ -S /var/run/docker.sock ]; then
+        # Dockerソケットがマウントされている場合
+        docker exec "$nginx_container" nginx -s reload
+    else
+        # シグナルファイル方式
+        touch "${NGINX_CONF_DIR}/.reload_signal"
+    fi
+}
+```
+
+```yaml
+# docker-compose.yml
+nginx:
+  volumes:
+    - ./nginx/watch-config.sh:/usr/local/bin/watch-config.sh:ro
+  entrypoint: >
+    sh -c "
+    if [ -f /usr/local/bin/watch-config.sh ]; then
+      chmod +x /usr/local/bin/watch-config.sh &&
+      /usr/local/bin/watch-config.sh &
+    fi &&
+    exec nginx -g 'daemon off;'
+    "
+```
+
+**参照**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘 - 第2回）
+
+---

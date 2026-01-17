@@ -105,6 +105,43 @@ else
 fi
 ```
 
+### 9. DockerソケットなしでのNginxリロード機構
+
+**指摘**: デフォルト構成でNginxのリロード機構が失敗する重大な問題
+
+**対応**:
+- Dockerソケットの有無を確認し、マウントされていない場合はシグナルファイル方式を使用
+- Nginxコンテナ内で`watch-config.sh`スクリプトがシグナルファイルを監視し、自動的にリロード
+- `config-agent.sh`でDockerソケットの存在を確認し、適切な方法を選択
+
+```bash
+# config-agent.sh
+reload_nginx_config() {
+    if [ -S /var/run/docker.sock ]; then
+        # Dockerソケットがマウントされている場合
+        docker exec "$nginx_container" nginx -s reload
+    else
+        # シグナルファイル方式
+        touch "${NGINX_CONF_DIR}/.reload_signal"
+    fi
+}
+```
+
+```yaml
+# docker-compose.yml
+nginx:
+  volumes:
+    - ./nginx/watch-config.sh:/usr/local/bin/watch-config.sh:ro
+  entrypoint: >
+    sh -c "
+    if [ -f /usr/local/bin/watch-config.sh ]; then
+      chmod +x /usr/local/bin/watch-config.sh &&
+      /usr/local/bin/watch-config.sh &
+    fi &&
+    exec nginx -g 'daemon off;'
+    "
+```
+
 ### 6. ドキュメント内の絶対パス
 
 **指摘**: 開発者固有の絶対パスがハードコードされている

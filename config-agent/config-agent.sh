@@ -57,24 +57,45 @@ reload_openappsec_config() {
 reload_nginx_config() {
     log_info "Nginxの設定リロードを実行中..."
     
-    # Nginxコンテナにシグナルを送信
     local nginx_container="${NGINX_CONTAINER_NAME:-mwd-nginx}"
     
-    # docker execを使用してリロード（同一Dockerネットワーク内から実行）
-    # 注意: Dockerソケットがマウントされていない場合は、シグナルファイル方式を使用
-    local reload_output
-    reload_output=$(docker exec "$nginx_container" nginx -s reload 2>&1)
-    local reload_status=$?
-    
-    if [ $reload_status -eq 0 ]; then
-        log_success "Nginxの設定リロードが完了しました"
-        return 0
+    # Dockerソケットがマウントされているか確認
+    if [ -S /var/run/docker.sock ]; then
+        # Dockerソケットがマウントされている場合: docker execを使用
+        log_info "Dockerソケットが利用可能です。docker execを使用してリロードします"
+        local reload_output
+        reload_output=$(docker exec "$nginx_container" nginx -s reload 2>&1)
+        local reload_status=$?
+        
+        if [ $reload_status -eq 0 ]; then
+            log_success "Nginxの設定リロードが完了しました"
+            return 0
+        else
+            log_warning "Nginxの設定リロードに失敗しました"
+            log_error "Nginxからのエラー: ${reload_output}"
+            return 1
+        fi
     else
-        log_warning "Nginxの設定リロードに失敗しました"
-        log_error "Nginxからのエラー: ${reload_output}"
-        # リロード失敗は設定が適用されていないことを意味するため、エラーとして返す
-        # 呼び出し元で次のポーリングサイクルで再試行できるようにする
-        return 1
+        # Dockerソケットがマウントされていない場合: シグナルファイル方式を使用
+        # Nginxコンテナ内のwatch-config.shスクリプトがシグナルファイルを監視し、自動的にリロードします
+        log_warning "Dockerソケットがマウントされていません"
+        log_info "シグナルファイル方式を使用します（Nginxコンテナ内のwatch-config.shが監視します）"
+        
+        # シグナルファイルを作成（共有ボリューム上）
+        local signal_file="${NGINX_CONF_DIR}/.reload_signal"
+        touch "$signal_file"
+        
+        # シグナルファイルの存在を確認
+        if [ -f "$signal_file" ]; then
+            log_info "シグナルファイルを作成しました: $signal_file"
+            log_info "Nginxコンテナ内のwatch-config.shがシグナルを検知してリロードします"
+            # シグナルファイル方式では、Nginxコンテナ側のwatch-config.shがリロードを実行するため、
+            # ここでは成功として扱う（実際のリロードはNginxコンテナ内で実行される）
+            return 0
+        else
+            log_error "シグナルファイルの作成に失敗しました: $signal_file"
+            return 1
+        fi
     fi
 }
 
