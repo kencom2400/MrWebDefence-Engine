@@ -10996,3 +10996,223 @@ extend-ignore = ["E203", "E266", "W503"]
 **参照**: PR #60 - Issue #23: CI/CDパイプラインの構築（Gemini Code Assistレビュー指摘 - 第2回）
 
 ---
+
+## 22. Gemini Code Assist レビューから学んだ観点（PR #34 OpenAppSec統合）
+
+### 22-1. Docker Compose設定のセキュリティリスク管理 🟡 Medium
+
+**学習元**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘）
+
+#### Dockerソケットのマウント
+
+**問題**: Dockerソケット（`/var/run/docker.sock`）のマウントはセキュリティリスクが高い
+
+**解決策**:
+- 開発環境ではコメントアウト
+- 本番環境では共有ボリューム上のシグナルファイルを監視する方法を検討
+- コメントでセキュリティリスクを明記
+
+```yaml
+# Dockerソケット（Nginxリロード用）
+# セキュリティ警告: Dockerソケットのマウントはセキュリティリスクがあります
+# 本番環境では、共有ボリューム上のシグナルファイルを監視する方法を検討してください
+# - /var/run/docker.sock:/var/run/docker.sock:ro
+```
+
+**参照**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘）
+
+---
+
+### 22-2. IPC設定と共有メモリの併用 🟡 Medium
+
+**学習元**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘）
+
+#### ipc: hostと共有メモリボリュームの併用
+
+**問題**: `ipc: host`と共有メモリボリュームの両方が設定されており、矛盾している可能性がある
+
+**解決策**:
+- **公式ドキュメントとのトレードオフ**: 公式ドキュメントでは`ipc: host`が推奨されているが、セキュリティリスクがある
+- **開発環境**: 公式ドキュメントに従って`ipc: host`を使用（動作確認のため）
+- **本番環境**: セキュリティリスクを考慮し、共有ボリュームのみを使用することを検討
+- コメントで両方の選択肢とリスクを明記
+
+```yaml
+# IPC設定: 共有メモリ通信のため重要
+# 公式ドキュメントではipc: hostが推奨されていますが、セキュリティリスクがあります
+# 開発環境: 公式ドキュメントに従ってipc: hostを使用（動作確認のため）
+# 本番環境: セキュリティリスクを考慮し、共有ボリュームのみの使用を検討
+# 共有ボリュームのみで動作する場合は、ipc: hostをコメントアウトしてください
+ipc: host
+```
+
+**参照**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘）
+
+---
+
+### 22-3. コンテナ起動時のパッケージインストールの効率化 🟢 Low
+
+**学習元**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘）
+
+#### 毎回のパッケージインストール
+
+**問題**: コンテナ起動時に毎回`apk add`を実行するのは非効率
+
+**解決策**:
+- カスタムDockerイメージを作成（`Dockerfile`を追加）
+- 依存パッケージをプリインストール
+- docker-compose.ymlで`build`ディレクティブを使用
+
+```dockerfile
+# Dockerfile例
+FROM alpine:latest
+RUN apk add --no-cache curl jq bash docker-cli
+WORKDIR /app/config-agent
+CMD ["./config-agent.sh"]
+```
+
+```yaml
+# docker-compose.yml
+config-agent:
+  build:
+    context: ../config-agent
+    dockerfile: Dockerfile
+  # または、依存パッケージを毎回インストール（非推奨）:
+  # image: alpine:latest
+  # command: /bin/sh -c "apk add --no-cache curl jq bash docker-cli && /app/config-agent/config-agent.sh"
+```
+
+**参照**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘）
+
+---
+
+### 22-4. SaaS管理UI対応の実装パターン 🟢 Low
+
+**学習元**: PR #34 - Task 5.1 OpenAppSec統合（SaaS管理UI対応追加）
+
+#### docker-compose.saas.ymlによる設定の分離
+
+**パターン**: ローカル管理とSaaS管理を別ファイルで管理
+
+**実装例**:
+- 基本設定: `docker-compose.yml`
+- SaaS管理用追加設定: `docker-compose.saas.yml`
+- 環境変数による切り替え: `.env`ファイル
+
+```bash
+# ローカル管理モード
+docker-compose -f docker-compose.yml up -d
+
+# SaaS管理モード
+docker-compose -f docker-compose.yml -f docker-compose.saas.yml up -d
+```
+
+**利点**:
+- 設定の分離により、管理モードの切り替えが容易
+- 既存の設定を維持しつつ、新機能を追加可能
+
+**参照**: PR #34 - Task 5.1 OpenAppSec統合（SaaS管理UI対応追加）
+
+---
+
+### 22-5. DockerソケットなしでのNginxリロード機構 🟡 Medium
+
+**学習元**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘 - 第2回）
+
+#### デフォルト構成でのNginxリロード失敗問題
+
+**問題**: `config-agent`が`docker exec`を使用してNginxをリロードしようとするが、デフォルト構成ではDockerソケットがマウントされていないため失敗する
+
+**解決策**:
+1. **Dockerソケットの有無を確認**: `config-agent.sh`でDockerソケットの存在を確認
+2. **シグナルファイル方式**: Dockerソケットがマウントされていない場合、シグナルファイルを作成
+3. **Nginxコンテナ内で監視**: Nginxコンテナ内で`watch-config.sh`スクリプトがシグナルファイルを監視し、自動的にリロード
+
+```bash
+# config-agent.sh
+reload_nginx_config() {
+    local nginx_container="${NGINX_CONTAINER_NAME:-mwd-nginx}"
+    
+    if [ -S /var/run/docker.sock ]; then
+        # Dockerソケットがマウントされている場合
+        docker exec "$nginx_container" nginx -s reload
+    else
+        # シグナルファイル方式
+        touch "${NGINX_CONF_DIR}/.reload_signal"
+    fi
+}
+```
+
+```yaml
+# docker-compose.yml
+nginx:
+  volumes:
+    - ./nginx/watch-config.sh:/usr/local/bin/watch-config.sh:ro
+  entrypoint: >
+    sh -c "
+    if [ -f /usr/local/bin/watch-config.sh ]; then
+      chmod +x /usr/local/bin/watch-config.sh &&
+      /usr/local/bin/watch-config.sh &
+    fi &&
+    exec nginx -g 'daemon off;'
+    "
+```
+
+**参照**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘 - 第2回）
+
+---
+
+### 22-6. 設計書と実装の整合性確認 🟡 Medium
+
+**学習元**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘 - 第3回）
+
+#### Nginx設定ファイルのOpenAppSecディレクティブ
+
+**問題**: 設計書に記載されているOpenAppSecディレクティブが実装でコメントアウトされている
+
+**解決策**:
+- 設計書（MWD-38-openappsec-integration.md）と実装の整合性を確認
+- 公式ドキュメントでは不要の可能性があるが、設計書との整合性を保つため、コメントで明確に説明
+- 実際の動作確認で必要に応じて有効化
+
+```nginx
+# OpenAppSec設定
+# 注意: 公式ドキュメントではこれらのディレクティブは不要かもしれませんが、
+# 設計書（MWD-38-openappsec-integration.md）では以下のディレクティブが定義されています：
+# - openappsec_agent_url http://openappsec-agent:8080;
+# - openappsec_enabled on;
+# 現在の実装では、モジュールの読み込み（load_module）のみで動作確認済みです。
+# 必要に応じて、これらのディレクティブを有効化してください。
+```
+
+**参照**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘 - 第3回）
+
+---
+
+### 22-7. コードの可読性向上 🟢 Low
+
+**学習元**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘 - 第3回）
+
+#### jqの文字列結合による可読性向上
+
+**問題**: 長く複雑な`jq`コマンドが読みにくい
+
+**解決策**:
+- `jq`の文字列結合（`+`）を使用して複数行に分割
+- 可読性を向上させる
+
+```bash
+# 修正前（1行）
+$(echo "$data" | jq -r '.[] | "    - host: \"\(.host)\"\n      mode: \(.mode)\n..."')
+
+# 修正後（複数行、jqの文字列結合を使用）
+$(echo "$data" | jq -r '.[] | 
+    "    - host: \"\(.host)\"\n" +
+    "      mode: \(.mode)\n" +
+    "      threatPreventionPractices: [threat-prevention-basic]\n" +
+    "      ..."')
+```
+
+**参照**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘 - 第3回）
+
+---

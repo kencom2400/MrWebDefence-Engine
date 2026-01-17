@@ -1,0 +1,47 @@
+# Jira設定ファイル（認証情報を含むため除外）
+scripts/jira/config.local.sh
+
+# 環境変数ファイル
+.env
+.env.local
+.env.*.local
+
+# 依存関係
+node_modules/
+.pnp
+.pnp.js
+
+# ビルド出力
+dist/
+build/
+.next/
+out/
+
+# ログファイル
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS生成ファイル
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# エディタ設定
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 一時ファイル
+*.tmp
+*.temp
+.cache/
+tmp/

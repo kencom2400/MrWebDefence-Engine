@@ -1,0 +1,170 @@
+services:
+  nginx:
+    # OpenAppSec公式のNginxイメージ（Attachment Moduleが組み込まれている）
+    # 注意: 特定バージョンを指定することを推奨（再現性のため）
+    # 現在は動作確認のため:latestを使用
+    image: ghcr.io/openappsec/nginx-attachment:latest
+    platform: linux/amd64
+    container_name: mwd-nginx
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      # 設定ファイル変更監視スクリプト（Dockerソケットがマウントされていない場合の代替手段）
+      - ./nginx/watch-config.sh:/usr/local/bin/watch-config.sh:ro
+      # 共有メモリ: OpenAppSec AgentとのIPC通信に使用
+      # 公式ドキュメント推奨のマウントポイント: /dev/shm/check-point
+      - nginx-shm:/dev/shm/check-point
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - openappsec-agent
+    networks:
+      - mwd-network
+    # IPC設定: 共有メモリ通信のため重要
+    # 公式ドキュメントではipc: hostが推奨されていますが、セキュリティリスクがあります
+    # 開発環境: 公式ドキュメントに従ってipc: hostを使用（動作確認のため）
+    # 本番環境: セキュリティリスクを考慮し、共有ボリュームのみの使用を検討
+    # 共有ボリュームのみで動作する場合は、ipc: hostをコメントアウトしてください
+    ipc: host
+    # 設定ファイル変更監視スクリプトをバックグラウンドで起動
+    # 注意: 公式イメージのentrypointを上書きするため、nginxコマンドも明示的に実行
+    # Dockerソケットがマウントされていない場合の代替手段として使用
+    entrypoint: >
+      sh -c "
+      if [ -f /usr/local/bin/watch-config.sh ]; then
+        chmod +x /usr/local/bin/watch-config.sh &&
+        /usr/local/bin/watch-config.sh &
+      fi &&
+      exec nginx -g 'daemon off;'
+      "
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  openappsec-agent:
+    # OpenAppSec公式のAgentイメージ
+    # 注意: 特定バージョンを指定することを推奨（再現性のため）
+    # 現在は動作確認のため:latestを使用
+    image: ghcr.io/openappsec/agent:latest
+    platform: linux/amd64
+    container_name: mwd-openappsec-agent
+    volumes:
+      # OpenAppSec設定ファイルのマウント（公式推奨パス）
+      - ./openappsec/local_policy.yaml:/ext/appsec/local_policy.yaml:ro
+      # 共有メモリ: NginxとのIPC通信に使用
+      # 公式ドキュメント推奨のマウントポイント: /dev/shm/check-point
+      - nginx-shm:/dev/shm/check-point
+    environment:
+      # サーバータイプ（公式ドキュメントで必須）
+      - registered_server=NGINX
+      # ローカルポリシーファイルを自動読み込み（変更を検知して約30秒で反映）
+      # デフォルト: true（ローカル管理）
+      # SaaS管理UIを使用する場合は docker-compose.saas.yml で false に設定
+      - autoPolicyLoad=${APPSEC_AUTO_POLICY_LOAD:-true}
+      # ログレベル
+      - OPENAPPSEC_LOG_LEVEL=${OPENAPPSEC_LOG_LEVEL:-info}
+      # SaaS管理を使用する場合は docker-compose.saas.yml を参照
+      # - AGENT_TOKEN=${APPSEC_AGENT_TOKEN}
+      # - user_email=${APPSEC_USER_EMAIL}
+    networks:
+      - mwd-network
+    # IPC設定: 共有メモリ通信のため重要
+    # 公式ドキュメントではipc: hostが推奨されていますが、セキュリティリスクがあります
+    # 開発環境: 公式ドキュメントに従ってipc: hostを使用（動作確認のため）
+    # 本番環境: セキュリティリスクを考慮し、共有ボリュームのみの使用を検討
+    # 共有ボリュームのみで動作する場合は、ipc: hostをコメントアウトしてください
+    ipc: host
+    # 公式ドキュメントのコマンド
+    command: /cp-nano-agent
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  mock-api:
+    # モックAPIサーバー（動作確認用）
+    image: python:3-alpine
+    container_name: mwd-mock-api
+    volumes:
+      - ../config-agent/mock-api-server.py:/app/mock-api-server.py:ro
+      - mock-api-config:/tmp
+    environment:
+      - MOCK_API_PORT=8080
+      - MOCK_API_CONFIG_FILE=/tmp/mock-api-config.json
+    ports:
+      - "8080:8080"
+    command: python3 /app/mock-api-server.py
+    networks:
+      - mwd-network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  config-agent:
+    # 設定取得エージェント
+    # 注意: 特定バージョンを指定することを推奨（再現性のため）
+    # 現在は動作確認のため:latestを使用
+    # カスタムイメージを使用する場合（推奨）:
+    # build:
+    #   context: ../config-agent
+    #   dockerfile: Dockerfile
+    # または、依存パッケージを毎回インストール（非推奨）:
+    image: alpine:latest
+    container_name: mwd-config-agent
+    volumes:
+      # 設定取得エージェントのスクリプト
+      - ../config-agent:/app/config-agent:ro
+      # 出力先: OpenAppSec設定ファイル
+      - ./openappsec:/app/output/openappsec:rw
+      # 出力先: Nginx設定ファイル
+      - ./nginx/conf.d:/app/output/nginx/conf.d:rw
+      # Dockerソケット（Nginxリロード用）
+      # セキュリティ警告: Dockerソケットのマウントはセキュリティリスクがあります
+      # 本番環境では、共有ボリューム上のシグナルファイルを監視する方法を検討してください
+      # - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - CONFIG_API_URL=${CONFIG_API_URL:-http://mock-api:8080}
+      - CONFIG_API_TOKEN=${CONFIG_API_TOKEN:-test-token}
+      - POLLING_INTERVAL=${POLLING_INTERVAL:-300}
+      - CACHE_TTL=${CACHE_TTL:-300}
+      - OUTPUT_DIR=/app/output
+      - NGINX_CONTAINER_NAME=mwd-nginx
+    # カスタムイメージを使用する場合:
+    # command: /app/config-agent/config-agent.sh
+    # または、依存パッケージを毎回インストール（非推奨）:
+    command: /bin/sh -c "apk add --no-cache curl jq bash docker-cli && /app/config-agent/config-agent.sh"
+    networks:
+      - mwd-network
+    depends_on:
+      - mock-api
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  # 共有メモリ用のtmpfsボリューム
+  # OpenAppSec AgentとNginx間のIPC通信に使用
+  nginx-shm:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+  # モックAPI設定ファイル用
+  mock-api-config:
+    driver: local
+
+networks:
+  mwd-network:
+    driver: bridge
