@@ -11303,3 +11303,145 @@ done < <(echo "$config_data" | jq -c '.fqdns[]')
 **参照**: PR #40 - Task 5.2: 設定取得・動的更新機能実装（Gemini Code Assistレビュー指摘）
 
 ---
+
+### 23-3. シェルスクリプトの関数呼び出し最適化 🟡 Medium
+
+**問題**: スタックトレース出力で`caller`を2回呼び出している非効率性
+
+**解決策**: `caller`の出力を一度変数に格納し、それをチェックと出力の両方に使用
+
+```bash
+# ❌ 悪い例: callerを2回呼び出し
+local frame=0
+while caller $frame >/dev/null 2>&1; do
+    caller $frame | sed "s/^/[DEBUG]   /" >&2
+    frame=$((frame + 1))
+done
+
+# ✅ 良い例: callerを1回だけ呼び出し
+local frame=0
+local call_info
+while call_info=$(caller $frame 2>/dev/null); do
+    echo "$call_info" | sed "s/^/[DEBUG]   /" >&2
+    frame=$((frame + 1))
+done
+```
+
+**理由**:
+- 関数呼び出しの回数を削減し、パフォーマンスを向上
+- コードの可読性も向上
+
+**参照**: PR #40 - Task 5.2: 設定取得・動的更新機能実装（Gemini Code Assistレビュー指摘 - 第2回）
+
+---
+
+### 23-4. ライブラリ関数での一時ファイルクリーンアップ 🟡 Medium
+
+**問題**: ライブラリ関数内で`mktemp`を使用しているが、`trap`によるクリーンアップがない
+
+**解決策**: 関数のスコープで`trap`を設定し、終了時に一時ファイルが確実に削除されるようにする
+
+```bash
+# ❌ 悪い例: 一時ファイルがクリーンアップされない
+fetch_config_from_api() {
+    local curl_stderr
+    curl_stderr=$(mktemp)
+    response=$(curl ... 2>"$curl_stderr")
+    # エラー時にrm -fが実行されない可能性がある
+    rm -f "$curl_stderr"
+}
+
+# ✅ 良い例: trapで確実にクリーンアップ
+fetch_config_from_api() {
+    local curl_stderr
+    curl_stderr=$(mktemp)
+    trap 'rm -f -- "$curl_stderr"' RETURN
+    response=$(curl ... 2>"$curl_stderr")
+    # 正常終了時もクリーンアップ
+    trap - RETURN
+    rm -f "$curl_stderr"
+}
+```
+
+**理由**:
+- 長時間実行されるエージェントでは、予期せぬ終了時に一時ファイルが残り、リソースリークの原因となる
+- `trap RETURN`を使用することで、関数の終了時に必ずクリーンアップされる
+
+**注意点**:
+- 正常終了時は`trap - RETURN`で解除してから手動削除するか、そのままtrapに任せる
+- エラー時も確実にクリーンアップされる
+
+**参照**: PR #40 - Task 5.2: 設定取得・動的更新機能実装（Gemini Code Assistレビュー指摘 - 第2回）
+
+---
+
+### 23-5. jqの複数回呼び出しを1回に統合 🟡 Medium
+
+**問題**: ループ内で`jq`が複数回呼び出されている非効率性
+
+**解決策**: 1回の`jq`呼び出しで必要なすべての値を変数に一括で設定
+
+```bash
+# ❌ 悪い例: jqを複数回呼び出し
+while IFS= read -r fqdn_config; do
+    local fqdn
+    fqdn=$(echo "$fqdn_config" | jq -r '.fqdn // empty')
+    local is_active
+    is_active=$(echo "$fqdn_config" | jq -r '.is_active // true')
+    local waf_mode
+    waf_mode=$(echo "$fqdn_config" | jq -r '.waf_mode // "detect-learn"')
+    # ...
+done
+
+# ✅ 良い例: 1回のjq呼び出しで一括設定
+while IFS= read -r fqdn_config; do
+    # @shフォーマットとevalを使用
+    eval "$(echo "$fqdn_config" | jq -r '@sh "
+        fqdn=\(.fqdn // "")
+        is_active=\(.is_active // true)
+        waf_mode=\(.waf_mode // "detect-learn")
+        custom_response=\(.custom_response // 403)
+        backend_host=\(.backend_host // "")
+        backend_port=\(.backend_port // 80)
+    "')"
+    # ...
+done
+```
+
+**理由**:
+- FQDNの数が増えるとパフォーマンスに影響を与える可能性がある
+- 1回の`jq`呼び出しで必要な値を一括設定することで、パフォーマンスを改善
+
+**注意点**:
+- `@sh`フォーマットはシェルで安全に使用できる形式にエスケープする
+- `eval`を使用するため、信頼できるデータソースからのみ使用すること
+
+**参照**: PR #40 - Task 5.2: 設定取得・動的更新機能実装（Gemini Code Assistレビュー指摘 - 第2回）
+
+---
+
+### 23-6. IPアドレス検証の厳密化 🟡 Medium
+
+**問題**: IPアドレスの正規表現が不正確で、`999.999.999.999`のような不正なIPも許可してしまう
+
+**解決策**: より厳密なIPアドレスの形式を検証する正規表現を使用
+
+```bash
+# ❌ 悪い例: 不正なIPアドレスも許可
+if ! echo "$ip" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'; then
+    # 999.999.999.999も許可されてしまう
+fi
+
+# ✅ 良い例: 0-255の範囲を正確にチェック
+if ! echo "$ip" | grep -qE '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$'; then
+    # 0-255の範囲のみ許可
+fi
+```
+
+**理由**:
+- IPアドレスの各オクテットは0-255の範囲である必要がある
+- より厳密な検証により、不正なIPアドレスを拒否できる
+
+**参照**: PR #40 - Task 5.2: 設定取得・動的更新機能実装（Gemini Code Assistレビュー指摘 - 第2回）
+
+---
