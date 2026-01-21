@@ -177,6 +177,11 @@ main_loop() {
     local success_count=0
     local last_error_time=""
     
+    # 一時ディレクトリを作成し、終了時に自動でクリーンアップする
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    trap 'rm -rf "$tmp_dir"' EXIT INT TERM
+    
     while true; do
         local loop_start_time
         loop_start_time=$(date +%s)
@@ -196,13 +201,11 @@ main_loop() {
         
         # 設定取得
         local config_data
-        local fetch_error
-        fetch_error=$(mktemp)
-        config_data=$(fetch_config_from_api 2>"$fetch_error")
+        local fetch_error_file="$tmp_dir/fetch_error"
+        config_data=$(fetch_config_from_api 2>"$fetch_error_file")
         local fetch_status=$?
         local fetch_error_msg
-        fetch_error_msg=$(cat "$fetch_error" 2>/dev/null || echo "")
-        rm -f "$fetch_error"
+        fetch_error_msg=$(cat "$fetch_error_file" 2>/dev/null || echo "")
         
         if [ $fetch_status -ne 0 ] || [ -z "$config_data" ]; then
             log_error "設定取得に失敗しました"
@@ -259,12 +262,10 @@ main_loop() {
         log_info "設定を更新中（バージョン: ${last_version:-"なし"} → $current_version）..."
         
         # 設定ファイル生成
-        local generate_error
-        generate_error=$(mktemp)
-        if generate_configs "$config_data" "$OPENAPPSEC_CONFIG" "$NGINX_CONF_DIR" 2>"$generate_error"; then
+        local generate_error_file="$tmp_dir/generate_error"
+        if generate_configs "$config_data" "$OPENAPPSEC_CONFIG" "$NGINX_CONF_DIR" 2>"$generate_error_file"; then
             local generate_error_msg
-            generate_error_msg=$(cat "$generate_error" 2>/dev/null || echo "")
-            rm -f "$generate_error"
+            generate_error_msg=$(cat "$generate_error_file" 2>/dev/null || echo "")
             
             if [ -n "$generate_error_msg" ]; then
                 log_warning "設定ファイル生成時の警告: $generate_error_msg"
@@ -279,12 +280,10 @@ main_loop() {
             fi
             
             # Nginxの設定リロード
-            local reload_error
-            reload_error=$(mktemp)
-            if ! reload_nginx_config 2>"$reload_error"; then
+            local reload_error_file="$tmp_dir/reload_error"
+            if ! reload_nginx_config 2>"$reload_error_file"; then
                 local reload_error_msg
-                reload_error_msg=$(cat "$reload_error" 2>/dev/null || echo "")
-                rm -f "$reload_error"
+                reload_error_msg=$(cat "$reload_error_file" 2>/dev/null || echo "")
                 log_error "Nginxの設定リロードに失敗しました"
                 if [ -n "$reload_error_msg" ]; then
                     log_error "リロードエラー詳細: $reload_error_msg"
@@ -293,7 +292,6 @@ main_loop() {
                 sleep 60
                 continue
             fi
-            rm -f "$reload_error"
             
             # バージョンを更新
             last_version="$current_version"
@@ -313,8 +311,7 @@ main_loop() {
             log_debug "累計成功回数: ${success_count}"
         else
             local generate_error_msg
-            generate_error_msg=$(cat "$generate_error" 2>/dev/null || echo "")
-            rm -f "$generate_error"
+            generate_error_msg=$(cat "$generate_error_file" 2>/dev/null || echo "")
             
             error_count=$((error_count + 1))
             last_error_time=$(date +'%Y-%m-%d %H:%M:%S')

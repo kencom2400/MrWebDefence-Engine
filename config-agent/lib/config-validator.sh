@@ -144,10 +144,8 @@ validate_config_data() {
                 log_info "FQDN設定の検証を開始（${fqdn_count}件）..."
                 
                 local fqdn_index=0
-                while [ $fqdn_index -lt $fqdn_count ]; do
-                    local fqdn_config
-                    fqdn_config=$(echo "$config_data" | jq -r ".fqdns[$fqdn_index]")
-                    
+                # jqで一度にすべてのFQDN設定を抽出し、while readで処理（パフォーマンス改善）
+                while IFS= read -r fqdn_config; do
                     # FQDNフィールドの確認
                     local fqdn
                     fqdn=$(echo "$fqdn_config" | jq -r '.fqdn // empty')
@@ -206,7 +204,7 @@ validate_config_data() {
                     fi
                     
                     fqdn_index=$((fqdn_index + 1))
-                done
+                done < <(echo "$config_data" | jq -c '.fqdns[]')
             fi
         fi
     fi
