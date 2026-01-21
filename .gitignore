@@ -45,3 +45,6 @@ Thumbs.db
 *.temp
 .cache/
 tmp/
+
+# Nginxリロードシグナルファイル（自動生成）
+docker/nginx/conf.d/.reload_signal
