@@ -11216,3 +11216,90 @@ $(echo "$data" | jq -r '.[] |
 **参照**: PR #34 - Task 5.1 OpenAppSec統合（Gemini Code Assistレビュー指摘 - 第3回）
 
 ---
+
+## 23. Gemini Code Assist レビューから学んだ観点（PR #40 Task 5.2）
+
+**学習元**: PR #40 - Task 5.2: 設定取得・動的更新機能実装（Gemini Code Assistレビュー指摘）
+
+### 23-1. シェルスクリプトの一時ファイルクリーンアップ 🟡 Medium
+
+**問題**: `mktemp`で作成した一時ファイルがスクリプト終了時にクリーンアップされない
+
+**解決策**: `trap`を使用して一時ディレクトリを作成し、終了時に自動クリーンアップ
+
+```bash
+# ❌ 悪い例: 一時ファイルがクリーンアップされない
+main_loop() {
+    while true; do
+        local fetch_error
+        fetch_error=$(mktemp)
+        config_data=$(fetch_config_from_api 2>"$fetch_error")
+        # スクリプトが予期せず終了した場合、一時ファイルが残る
+        rm -f "$fetch_error"
+    done
+}
+
+# ✅ 良い例: trapで確実にクリーンアップ
+main_loop() {
+    # 一時ディレクトリを作成し、終了時に自動でクリーンアップする
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    trap 'rm -rf "$tmp_dir"' EXIT INT TERM
+    
+    while true; do
+        # 一時ファイルは作成したディレクトリ内に作る
+        local fetch_error_file="$tmp_dir/fetch_error"
+        config_data=$(fetch_config_from_api 2>"$fetch_error_file")
+        # クリーンアップはtrapで自動実行される
+    done
+}
+```
+
+**理由**:
+- エージェントのような長時間実行されるプロセスでは、リソースリークは問題につながる
+- `trap`を使用することで、スクリプトが予期せず終了した場合でも確実にクリーンアップされる
+- 一時ディレクトリを一つ作成し、その中でファイルを管理する方法がシンプルで効果的
+
+**参照**: PR #40 - Task 5.2: 設定取得・動的更新機能実装（Gemini Code Assistレビュー指摘）
+
+---
+
+### 23-2. シェルスクリプトのループ処理におけるパフォーマンス改善 🟡 Medium
+
+**問題**: ループ内で大きなJSONデータを再パースするため、FQDNの数が多い場合にパフォーマンスが低下
+
+**解決策**: `jq`を使って一度にすべてのFQDN設定オブジェクトを抽出し、`while read`で処理
+
+```bash
+# ❌ 悪い例: ループ内で大きなJSONを再パース
+local fqdn_index=0
+while [ $fqdn_index -lt $fqdn_count ]; do
+    local fqdn_config
+    fqdn_config=$(echo "$config_data" | jq -r ".fqdns[$fqdn_index]")
+    # 大きなJSONデータを毎回パースするため非効率
+    # ...
+    fqdn_index=$((fqdn_index + 1))
+done
+
+# ✅ 良い例: 一度にすべてのFQDN設定を抽出
+local fqdn_index=0
+while IFS= read -r fqdn_config; do
+    # 小さなJSONオブジェクトをパースするため効率的
+    local fqdn
+    fqdn=$(echo "$fqdn_config" | jq -r '.fqdn // empty')
+    # ...
+    fqdn_index=$((fqdn_index + 1))
+done < <(echo "$config_data" | jq -c '.fqdns[]')
+```
+
+**理由**:
+- `jq -c '.fqdns[]'`で一度にすべてのFQDN設定を抽出し、ループ内では小さなJSONオブジェクトをパースするため、全体の処理が高速になる
+- プロセス置換（`< <()`）を使用することで、サブシェルではなく同じシェルで実行されるため、変数の更新が正しく反映される
+
+**注意点**:
+- `while read`をパイプで使うとサブシェルで実行されるため、変数の更新が反映されない
+- プロセス置換（`< <()`）を使用することで、同じシェルで実行される
+
+**参照**: PR #40 - Task 5.2: 設定取得・動的更新機能実装（Gemini Code Assistレビュー指摘）
+
+---
