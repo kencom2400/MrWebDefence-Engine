@@ -6,10 +6,12 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_AGENT_ROOT="${SCRIPT_DIR}"
 
 # ライブラリの読み込み
-source "${SCRIPT_DIR}/lib/api-client.sh"
-source "${SCRIPT_DIR}/lib/config-generator.sh"
+source "${CONFIG_AGENT_ROOT}/lib/api-client.sh"
+source "${CONFIG_AGENT_ROOT}/lib/config-generator.sh"
+source "${CONFIG_AGENT_ROOT}/lib/config-validator.sh"
 
 # 設定の読み込み
 CONFIG_API_URL="${CONFIG_API_URL:-http://config-api:8080}"
@@ -22,21 +24,71 @@ OUTPUT_DIR="${OUTPUT_DIR:-/app/output}"
 OPENAPPSEC_CONFIG="${OUTPUT_DIR}/openappsec/local_policy.yaml"
 NGINX_CONF_DIR="${OUTPUT_DIR}/nginx/conf.d"
 
+# ログレベル設定
+LOG_LEVEL="${LOG_LEVEL:-INFO}"
+
+# ログレベルの数値化
+get_log_level_value() {
+    case "$1" in
+        DEBUG) echo 0 ;;
+        INFO)  echo 1 ;;
+        WARN)  echo 2 ;;
+        ERROR) echo 3 ;;
+        *)     echo 1 ;;  # デフォルトはINFO
+    esac
+}
+
+# ログレベル判定
+should_log() {
+    local message_level="$1"
+    local current_level_value
+    local message_level_value
+    
+    current_level_value=$(get_log_level_value "$LOG_LEVEL")
+    message_level_value=$(get_log_level_value "$message_level")
+    
+    [ $message_level_value -ge $current_level_value ]
+}
+
 # ログ出力関数
+log_debug() {
+    if should_log "DEBUG"; then
+        echo "[$(date +'%Y-%m-%d %H:%M:%S')] [DEBUG] $*"
+    fi
+}
+
 log_info() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] ℹ️  $*"
+    if should_log "INFO"; then
+        echo "[$(date +'%Y-%m-%d %H:%M:%S')] [INFO] ℹ️  $*"
+    fi
 }
 
 log_success() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] ✅ $*"
+    if should_log "INFO"; then
+        echo "[$(date +'%Y-%m-%d %H:%M:%S')] [INFO] ✅ $*"
+    fi
 }
 
 log_warning() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] ⚠️  $*" >&2
+    if should_log "WARN"; then
+        echo "[$(date +'%Y-%m-%d %H:%M:%S')] [WARN] ⚠️  $*" >&2
+    fi
 }
 
 log_error() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] ❌ $*" >&2
+    if should_log "ERROR"; then
+        echo "[$(date +'%Y-%m-%d %H:%M:%S')] [ERROR] ❌ $*" >&2
+        # エラー発生時のスタックトレース（呼び出し元情報）
+        if [ "${LOG_LEVEL}" = "DEBUG" ]; then
+            echo "[$(date +'%Y-%m-%d %H:%M:%S')] [DEBUG] スタックトレース:" >&2
+            local frame=0
+            local call_info
+            while call_info=$(caller $frame 2>/dev/null); do
+                echo "$call_info" | sed "s/^/[$(date +'%Y-%m-%d %H:%M:%S')] [DEBUG]   /" >&2
+                frame=$((frame + 1))
+            done
+        fi
+    fi
 }
 
 # OpenAppSec Agentの設定リロード
@@ -109,6 +161,10 @@ main_loop() {
     log_info "管理API URL: ${CONFIG_API_URL}"
     log_info "ポーリング間隔: ${POLLING_INTERVAL}秒"
     log_info "キャッシュTTL: ${CACHE_TTL}秒"
+    log_info "ログレベル: ${LOG_LEVEL}"
+    log_debug "出力ディレクトリ: ${OUTPUT_DIR}"
+    log_debug "OpenAppSec設定ファイル: ${OPENAPPSEC_CONFIG}"
+    log_debug "Nginx設定ディレクトリ: ${NGINX_CONF_DIR}"
     
     # 環境変数の確認
     if [ -z "$CONFIG_API_TOKEN" ]; then
@@ -117,8 +173,22 @@ main_loop() {
         exit 1
     fi
     
+    # エラー統計
+    local error_count=0
+    local success_count=0
+    local last_error_time=""
+    
+    # 一時ディレクトリを作成し、終了時に自動でクリーンアップする
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    trap 'rm -rf "$tmp_dir"' EXIT INT TERM
+    
     while true; do
+        local loop_start_time
+        loop_start_time=$(date +%s)
+        
         log_info "設定取得を開始..."
+        log_debug "ループ開始時刻: $(date -d "@$loop_start_time" +'%Y-%m-%d %H:%M:%S' 2>/dev/null || date +'%Y-%m-%d %H:%M:%S')"
         
         # キャッシュの確認
         if [ -f "$cache_file" ] && [ -f "$cache_timestamp_file" ]; then
@@ -132,17 +202,52 @@ main_loop() {
         
         # 設定取得
         local config_data
-        config_data=$(fetch_config_from_api)
+        local fetch_error_file="$tmp_dir/fetch_error"
+        config_data=$(fetch_config_from_api 2>"$fetch_error_file")
+        local fetch_status=$?
+        local fetch_error_msg
+        fetch_error_msg=$(cat "$fetch_error_file" 2>/dev/null || echo "")
         
-        if [ $? -ne 0 ] || [ -z "$config_data" ]; then
-            log_error "設定取得に失敗しました。リトライします..."
+        if [ $fetch_status -ne 0 ] || [ -z "$config_data" ]; then
+            log_error "設定取得に失敗しました"
+            if [ -n "$fetch_error_msg" ]; then
+                log_error "エラー詳細: $fetch_error_msg"
+            fi
+            log_info "60秒後にリトライします..."
+            sleep 60
+            continue
+        fi
+        
+        # JSON形式の検証
+        if ! echo "$config_data" | jq empty 2>/dev/null; then
+            local json_error
+            json_error=$(echo "$config_data" | jq . 2>&1 | head -5 || echo "JSONパースエラー")
+            log_error "取得したデータが有効なJSON形式ではありません"
+            log_error "JSONエラー詳細: $json_error"
+            log_info "60秒後にリトライします..."
+            sleep 60
+            continue
+        fi
+        
+        # 設定データの検証
+        if ! validate_config_data "$config_data"; then
+            log_error "設定データの検証に失敗しました"
+            log_info "60秒後にリトライします..."
             sleep 60
             continue
         fi
         
         # バージョン確認
         local current_version
-        current_version=$(echo "$config_data" | jq -r '.version // empty')
+        current_version=$(echo "$config_data" | jq -r '.version // empty' 2>/dev/null)
+        local jq_version_status=$?
+        
+        if [ $jq_version_status -ne 0 ]; then
+            log_error "バージョン番号の取得に失敗しました（jqエラー）"
+            log_info "60秒後にリトライします..."
+            sleep 60
+            continue
+        fi
         
         if [ -z "$current_version" ]; then
             log_warning "バージョン番号が取得できませんでした。設定を更新します..."
@@ -158,13 +263,33 @@ main_loop() {
         log_info "設定を更新中（バージョン: ${last_version:-"なし"} → $current_version）..."
         
         # 設定ファイル生成
-        if generate_configs "$config_data" "$OPENAPPSEC_CONFIG" "$NGINX_CONF_DIR"; then
+        local generate_error_file="$tmp_dir/generate_error"
+        if generate_configs "$config_data" "$OPENAPPSEC_CONFIG" "$NGINX_CONF_DIR" 2>"$generate_error_file"; then
+            local generate_error_msg
+            generate_error_msg=$(cat "$generate_error_file" 2>/dev/null || echo "")
+            
+            if [ -n "$generate_error_msg" ]; then
+                log_warning "設定ファイル生成時の警告: $generate_error_msg"
+            fi
+            
             # OpenAppSec Agentの設定リロード
-            reload_openappsec_config
+            if ! reload_openappsec_config; then
+                log_error "OpenAppSec Agentの設定リロードに失敗しました"
+                log_info "60秒後にリトライします..."
+                sleep 60
+                continue
+            fi
             
             # Nginxの設定リロード
-            if ! reload_nginx_config; then
-                log_error "Nginxの設定リロードに失敗しました。次のポーリングサイクルで再試行します"
+            local reload_error_file="$tmp_dir/reload_error"
+            if ! reload_nginx_config 2>"$reload_error_file"; then
+                local reload_error_msg
+                reload_error_msg=$(cat "$reload_error_file" 2>/dev/null || echo "")
+                log_error "Nginxの設定リロードに失敗しました"
+                if [ -n "$reload_error_msg" ]; then
+                    log_error "リロードエラー詳細: $reload_error_msg"
+                fi
+                log_info "60秒後にリトライします..."
                 sleep 60
                 continue
             fi
@@ -176,13 +301,38 @@ main_loop() {
             echo "$config_data" > "$cache_file"
             echo "$(date +%s)" > "$cache_timestamp_file"
             
-            log_success "設定更新完了（バージョン: $current_version）"
+            success_count=$((success_count + 1))
+            error_count=0  # 成功時はエラーカウントをリセット
+            
+            local loop_end_time
+            loop_end_time=$(date +%s)
+            local processing_time=$((loop_end_time - loop_start_time))
+            
+            log_success "設定更新完了（バージョン: $current_version、処理時間: ${processing_time}秒）"
+            log_debug "累計成功回数: ${success_count}"
         else
-            log_error "設定ファイルの生成に失敗しました"
+            local generate_error_msg
+            generate_error_msg=$(cat "$generate_error_file" 2>/dev/null || echo "")
+            
+            error_count=$((error_count + 1))
+            last_error_time=$(date +'%Y-%m-%d %H:%M:%S')
+            
+            log_error "設定ファイルの生成に失敗しました（連続エラー: ${error_count}回）"
+            if [ -n "$generate_error_msg" ]; then
+                log_error "生成エラー詳細: $generate_error_msg"
+            fi
+            
+            # 連続エラー時の警告
+            if [ $error_count -ge 5 ]; then
+                log_warning "連続エラーが ${error_count} 回発生しています。最後のエラー時刻: ${last_error_time}"
+            fi
+            
+            log_info "60秒後にリトライします..."
             sleep 60
             continue
         fi
         
+        log_debug "次のポーリングまで ${POLLING_INTERVAL} 秒待機します"
         sleep $POLLING_INTERVAL
     done
 }

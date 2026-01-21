@@ -18,21 +18,54 @@ generate_openappsec_policy() {
     # 出力ディレクトリを作成
     mkdir -p "$(dirname "$output_file")"
     
+    # JSON形式の検証
+    if ! echo "$config_data" | jq empty 2>/dev/null; then
+        local json_error
+        json_error=$(echo "$config_data" | jq . 2>&1 | head -5 || echo "JSONパースエラー")
+        echo "❌ エラー: 設定データが有効なJSON形式ではありません" >&2
+        echo "❌ JSONエラー詳細: $json_error" >&2
+        return 1
+    fi
+    
     # デフォルトモードを取得
     local default_mode
     default_mode=$(echo "$config_data" | jq -r '.default_mode // "detect-learn"')
+    if [ $? -ne 0 ] || [ -z "$default_mode" ]; then
+        echo "❌ エラー: default_modeの取得に失敗しました" >&2
+        return 1
+    fi
     
     # デフォルトカスタムレスポンス
     local default_custom_response
     default_custom_response=$(echo "$config_data" | jq -r '.default_custom_response // 403')
+    if [ $? -ne 0 ] || [ -z "$default_custom_response" ]; then
+        echo "❌ エラー: default_custom_responseの取得に失敗しました" >&2
+        return 1
+    fi
     
     # FQDN別設定（specificRules）を生成
     local specific_rules_json
+    local jq_error
+    jq_error=$(mktemp)
+    trap 'rm -f -- "$jq_error"' RETURN
     specific_rules_json=$(echo "$config_data" | jq -r '.fqdns[]? | select(.is_active == true) | {
         host: .fqdn,
         mode: (.waf_mode // "detect-learn"),
         customResponse: (.custom_response // 403)
-    }' | jq -s '.')
+    }' 2>"$jq_error" | jq -s '.' 2>>"$jq_error")
+    local jq_status=$?
+    
+    if [ $jq_status -ne 0 ]; then
+        local error_msg
+        error_msg=$(cat "$jq_error" 2>/dev/null || echo "jqエラー")
+        echo "❌ エラー: FQDN設定の取得に失敗しました" >&2
+        echo "❌ jqエラー詳細: $error_msg" >&2
+        trap - RETURN
+        rm -f "$jq_error"
+        return 1
+    fi
+    trap - RETURN
+    rm -f "$jq_error"
     
     # threatPreventionPracticesの使用判定（prevent/prevent-learnモードの場合は使用）
     local use_threat_prevention="false"
@@ -155,24 +188,40 @@ $(echo "$specific_rules_json" | jq -r '.[] | "    - host: \"\(.host)\"\n      mo
 EOF
     fi
     
+    # ファイル生成の確認
+    if [ ! -f "$output_file" ]; then
+        echo "❌ エラー: 設定ファイルの生成に失敗しました（ファイルが存在しません）" >&2
+        return 1
+    fi
+    
+    if [ ! -s "$output_file" ]; then
+        echo "❌ エラー: 設定ファイルが空です: $output_file" >&2
+        return 1
+    fi
+    
     # YAML構文の検証（yqまたはpythonを使用）
     if command -v yq >/dev/null 2>&1; then
-        if yq eval . "$output_file" >/dev/null 2>&1; then
+        local yq_error
+        yq_error=$(mktemp)
+        trap 'rm -f -- "$yq_error"' RETURN
+        if yq eval . "$output_file" >/dev/null 2>"$yq_error"; then
+            trap - RETURN
+            rm -f "$yq_error"
             echo "✅ OpenAppSec設定ファイルを生成しました: $output_file"
             return 0
         else
-            echo "⚠️  YAML構文エラーの可能性があります: $output_file" >&2
+            local error_msg
+            error_msg=$(cat "$yq_error" 2>/dev/null || echo "YAML構文エラー")
+            echo "❌ エラー: YAML構文エラーが検出されました: $output_file" >&2
+            echo "❌ YAMLエラー詳細: $error_msg" >&2
+            trap - RETURN
+            rm -f "$yq_error"
             return 1
         fi
     else
         # yqが利用できない場合は、基本的な検証のみ
-        if [ -f "$output_file" ] && [ -s "$output_file" ]; then
-            echo "✅ OpenAppSec設定ファイルを生成しました: $output_file"
-            echo "⚠️  YAML構文の検証にはyqが必要です（オプション）"
-            return 0
-        else
-            echo "❌ 設定ファイルの生成に失敗しました" >&2
-            return 1
-        fi
+        echo "✅ OpenAppSec設定ファイルを生成しました: $output_file"
+        echo "⚠️  YAML構文の検証にはyqが必要です（オプション）" >&2
+        return 0
     fi
 }
