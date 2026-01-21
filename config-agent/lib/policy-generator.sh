@@ -47,6 +47,7 @@ generate_openappsec_policy() {
     local specific_rules_json
     local jq_error
     jq_error=$(mktemp)
+    trap 'rm -f -- "$jq_error"' RETURN
     specific_rules_json=$(echo "$config_data" | jq -r '.fqdns[]? | select(.is_active == true) | {
         host: .fqdn,
         mode: (.waf_mode // "detect-learn"),
@@ -59,9 +60,11 @@ generate_openappsec_policy() {
         error_msg=$(cat "$jq_error" 2>/dev/null || echo "jqエラー")
         echo "❌ エラー: FQDN設定の取得に失敗しました" >&2
         echo "❌ jqエラー詳細: $error_msg" >&2
+        trap - RETURN
         rm -f "$jq_error"
         return 1
     fi
+    trap - RETURN
     rm -f "$jq_error"
     
     # threatPreventionPracticesの使用判定（prevent/prevent-learnモードの場合は使用）
@@ -200,7 +203,9 @@ EOF
     if command -v yq >/dev/null 2>&1; then
         local yq_error
         yq_error=$(mktemp)
+        trap 'rm -f -- "$yq_error"' RETURN
         if yq eval . "$output_file" >/dev/null 2>"$yq_error"; then
+            trap - RETURN
             rm -f "$yq_error"
             echo "✅ OpenAppSec設定ファイルを生成しました: $output_file"
             return 0
@@ -209,6 +214,7 @@ EOF
             error_msg=$(cat "$yq_error" 2>/dev/null || echo "YAML構文エラー")
             echo "❌ エラー: YAML構文エラーが検出されました: $output_file" >&2
             echo "❌ YAMLエラー詳細: $error_msg" >&2
+            trap - RETURN
             rm -f "$yq_error"
             return 1
         fi

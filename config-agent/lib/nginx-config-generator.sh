@@ -31,6 +31,7 @@ generate_nginx_configs() {
     local active_fqdns
     local jq_error
     jq_error=$(mktemp)
+    trap 'rm -f -- "$jq_error"' RETURN
     active_fqdns=$(echo "$config_data" | jq -r '.fqdns[]? | select(.is_active == true) | .fqdn' 2>"$jq_error")
     local jq_status=$?
     
@@ -39,9 +40,11 @@ generate_nginx_configs() {
         error_msg=$(cat "$jq_error" 2>/dev/null || echo "jqエラー")
         echo "❌ エラー: FQDNリストの取得に失敗しました" >&2
         echo "❌ jqエラー詳細: $error_msg" >&2
+        trap - RETURN
         rm -f "$jq_error"
         return 1
     fi
+    trap - RETURN
     rm -f "$jq_error"
     
     if [ -z "$active_fqdns" ]; then
@@ -59,6 +62,7 @@ generate_nginx_configs() {
         local fqdn_config
         local jq_error
         jq_error=$(mktemp)
+        trap 'rm -f -- "$jq_error"' RETURN
         fqdn_config=$(echo "$config_data" | jq -r --arg fqdn "$fqdn" '.fqdns[] | select(.fqdn == $fqdn)' 2>"$jq_error")
         local jq_status=$?
         
@@ -66,9 +70,11 @@ generate_nginx_configs() {
             local error_msg
             error_msg=$(cat "$jq_error" 2>/dev/null || echo "jqエラー")
             echo "⚠️  警告: FQDN '$fqdn' の設定取得に失敗しました: $error_msg" >&2
+            trap - RETURN
             rm -f "$jq_error"
             continue
         fi
+        trap - RETURN
         rm -f "$jq_error"
         
         # バックエンド設定を取得

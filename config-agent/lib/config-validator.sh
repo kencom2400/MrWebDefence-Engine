@@ -146,9 +146,17 @@ validate_config_data() {
                 local fqdn_index=0
                 # jqで一度にすべてのFQDN設定を抽出し、while readで処理（パフォーマンス改善）
                 while IFS= read -r fqdn_config; do
+                    # 1回のjq呼び出しで必要な値を変数に一括で設定（パフォーマンス改善）
+                    eval "$(echo "$fqdn_config" | jq -r '@sh "
+                        fqdn=\(.fqdn // "")
+                        is_active=\(.is_active // true)
+                        waf_mode=\(.waf_mode // "detect-learn")
+                        custom_response=\(.custom_response // 403)
+                        backend_host=\(.backend_host // "")
+                        backend_port=\(.backend_port // 80)
+                    "')"
+                    
                     # FQDNフィールドの確認
-                    local fqdn
-                    fqdn=$(echo "$fqdn_config" | jq -r '.fqdn // empty')
                     if [ -z "$fqdn" ]; then
                         log_error "FQDN設定[$fqdn_index]: 'fqdn' フィールドが存在しません"
                         validation_errors=$((validation_errors + 1))
@@ -160,8 +168,6 @@ validate_config_data() {
                     fi
                     
                     # is_activeフィールドの確認（オプション、デフォルトはtrue）
-                    local is_active
-                    is_active=$(echo "$fqdn_config" | jq -r '.is_active // true')
                     if [ "$is_active" != "true" ] && [ "$is_active" != "false" ]; then
                         log_error "FQDN設定[$fqdn_index] ($fqdn): 'is_active' は true または false である必要があります"
                         validation_errors=$((validation_errors + 1))
@@ -170,33 +176,25 @@ validate_config_data() {
                     # アクティブなFQDNのみ、追加の検証を実行
                     if [ "$is_active" = "true" ]; then
                         # waf_modeの検証（オプション）
-                        local waf_mode
-                        waf_mode=$(echo "$fqdn_config" | jq -r '.waf_mode // "detect-learn"')
                         if ! validate_waf_mode "$waf_mode"; then
                             validation_errors=$((validation_errors + 1))
                         fi
                         
                         # custom_responseの検証（オプション）
-                        local custom_response
-                        custom_response=$(echo "$fqdn_config" | jq -r '.custom_response // 403')
                         if ! validate_custom_response "$custom_response"; then
                             validation_errors=$((validation_errors + 1))
                         fi
                         
                         # backend_hostの検証（オプション）
-                        local backend_host
-                        backend_host=$(echo "$fqdn_config" | jq -r '.backend_host // empty')
                         if [ -n "$backend_host" ]; then
-                            # backend_hostはFQDNまたはIPアドレスの形式
-                            if ! echo "$backend_host" | grep -qE '^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*|[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})$'; then
+                            # backend_hostはFQDNまたはIPアドレスの形式（厳密なIPアドレス検証）
+                            if ! echo "$backend_host" | grep -qE '^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*|(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5]))$'; then
                                 log_error "FQDN設定[$fqdn_index] ($fqdn): 無効なbackend_host形式: $backend_host"
                                 validation_errors=$((validation_errors + 1))
                             fi
                         fi
                         
                         # backend_portの検証（オプション）
-                        local backend_port
-                        backend_port=$(echo "$fqdn_config" | jq -r '.backend_port // 80')
                         if ! validate_port "$backend_port"; then
                             log_error "FQDN設定[$fqdn_index] ($fqdn): 無効なbackend_port"
                             validation_errors=$((validation_errors + 1))

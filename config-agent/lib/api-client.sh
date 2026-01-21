@@ -31,6 +31,7 @@ fetch_config_from_api() {
     while [ $retry_count -lt $max_retries ]; do
         local curl_stderr
         curl_stderr=$(mktemp)
+        trap 'rm -f -- "$curl_stderr"' RETURN
         response=$(curl -s -w "\n%{http_code}" \
             -X GET \
             -H "Authorization: Bearer ${token}" \
@@ -44,6 +45,7 @@ fetch_config_from_api() {
         if [ $curl_exit_code -ne 0 ]; then
             local curl_error_msg
             curl_error_msg=$(cat "$curl_stderr" 2>/dev/null || echo "不明なエラー")
+            trap - RETURN
             rm -f "$curl_stderr"
             
             retry_count=$((retry_count + 1))
@@ -61,6 +63,7 @@ fetch_config_from_api() {
             fi
         fi
         
+        trap - RETURN
         rm -f "$curl_stderr"
         
         http_code=$(echo "$response" | tail -n1)

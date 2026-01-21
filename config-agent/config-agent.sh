@@ -82,8 +82,9 @@ log_error() {
         if [ "${LOG_LEVEL}" = "DEBUG" ]; then
             echo "[$(date +'%Y-%m-%d %H:%M:%S')] [DEBUG] スタックトレース:" >&2
             local frame=0
-            while caller $frame >/dev/null 2>&1; do
-                caller $frame | sed "s/^/[$(date +'%Y-%m-%d %H:%M:%S')] [DEBUG]   /" >&2
+            local call_info
+            while call_info=$(caller $frame 2>/dev/null); do
+                echo "$call_info" | sed "s/^/[$(date +'%Y-%m-%d %H:%M:%S')] [DEBUG]   /" >&2
                 frame=$((frame + 1))
             done
         fi
