@@ -18,9 +18,31 @@ generate_nginx_configs() {
     # 出力ディレクトリを作成
     mkdir -p "$output_dir"
     
+    # JSON形式の検証
+    if ! echo "$config_data" | jq empty 2>/dev/null; then
+        local json_error
+        json_error=$(echo "$config_data" | jq . 2>&1 | head -5 || echo "JSONパースエラー")
+        echo "❌ エラー: 設定データが有効なJSON形式ではありません" >&2
+        echo "❌ JSONエラー詳細: $json_error" >&2
+        return 1
+    fi
+    
     # アクティブなFQDNのリストを取得
     local active_fqdns
-    active_fqdns=$(echo "$config_data" | jq -r '.fqdns[]? | select(.is_active == true) | .fqdn')
+    local jq_error
+    jq_error=$(mktemp)
+    active_fqdns=$(echo "$config_data" | jq -r '.fqdns[]? | select(.is_active == true) | .fqdn' 2>"$jq_error")
+    local jq_status=$?
+    
+    if [ $jq_status -ne 0 ]; then
+        local error_msg
+        error_msg=$(cat "$jq_error" 2>/dev/null || echo "jqエラー")
+        echo "❌ エラー: FQDNリストの取得に失敗しました" >&2
+        echo "❌ jqエラー詳細: $error_msg" >&2
+        rm -f "$jq_error"
+        return 1
+    fi
+    rm -f "$jq_error"
     
     if [ -z "$active_fqdns" ]; then
         echo "⚠️  アクティブなFQDNが見つかりません" >&2
@@ -35,15 +57,41 @@ generate_nginx_configs() {
         
         # FQDN設定を取得
         local fqdn_config
-        fqdn_config=$(echo "$config_data" | jq -r --arg fqdn "$fqdn" '.fqdns[] | select(.fqdn == $fqdn)')
+        local jq_error
+        jq_error=$(mktemp)
+        fqdn_config=$(echo "$config_data" | jq -r --arg fqdn "$fqdn" '.fqdns[] | select(.fqdn == $fqdn)' 2>"$jq_error")
+        local jq_status=$?
+        
+        if [ $jq_status -ne 0 ] || [ -z "$fqdn_config" ]; then
+            local error_msg
+            error_msg=$(cat "$jq_error" 2>/dev/null || echo "jqエラー")
+            echo "⚠️  警告: FQDN '$fqdn' の設定取得に失敗しました: $error_msg" >&2
+            rm -f "$jq_error"
+            continue
+        fi
+        rm -f "$jq_error"
         
         # バックエンド設定を取得
         local backend_host
         backend_host=$(echo "$fqdn_config" | jq -r '.backend_host // "httpbin.org"')
+        if [ $? -ne 0 ] || [ -z "$backend_host" ]; then
+            echo "⚠️  警告: FQDN '$fqdn' のbackend_hostが取得できません。デフォルト値を使用します" >&2
+            backend_host="httpbin.org"
+        fi
+        
         local backend_port
         backend_port=$(echo "$fqdn_config" | jq -r '.backend_port // 80')
+        if [ $? -ne 0 ] || [ -z "$backend_port" ]; then
+            echo "⚠️  警告: FQDN '$fqdn' のbackend_portが取得できません。デフォルト値を使用します" >&2
+            backend_port="80"
+        fi
+        
         local backend_path
         backend_path=$(echo "$fqdn_config" | jq -r '.backend_path // ""')
+        if [ $? -ne 0 ]; then
+            echo "⚠️  警告: FQDN '$fqdn' のbackend_pathが取得できません。空文字列を使用します" >&2
+            backend_path=""
+        fi
         
         # バックエンドURLを構築
         local backend_url
@@ -56,7 +104,7 @@ generate_nginx_configs() {
         local config_file="${output_dir}/${fqdn}.conf"
         
         # Nginx設定ファイルを生成
-        cat > "$config_file" << EOF
+        if ! cat > "$config_file" << EOF
 # FQDN設定: ${fqdn}
 # 自動生成: $(date +'%Y-%m-%d %H:%M:%S')
 
@@ -90,6 +138,16 @@ server {
     }
 }
 EOF
+        then
+            echo "❌ エラー: Nginx設定ファイルの書き込みに失敗しました: $config_file" >&2
+            continue
+        fi
+        
+        # ファイル生成の確認
+        if [ ! -f "$config_file" ] || [ ! -s "$config_file" ]; then
+            echo "❌ エラー: Nginx設定ファイルが正しく生成されませんでした: $config_file" >&2
+            continue
+        fi
         
         echo "✅ Nginx設定ファイルを生成しました: $config_file"
     done
