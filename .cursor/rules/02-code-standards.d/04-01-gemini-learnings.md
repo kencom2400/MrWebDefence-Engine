@@ -11959,3 +11959,57 @@ fi
 **参照**: PR #42 - Task 5.3: ログ転送機能の実装（Gemini Code Assistレビュー指摘）
 
 ---
+
+### 24-16. Fluentdのrecord_transformerでtagディレクティブの制約 🔴 Critical
+
+**問題**: `record_transformer`の`tag`ディレクティブは、同じ`<record>`ブロック内で定義された新しいフィールド（`record['hostname']`など）を参照できない。これは`record_transformer`の制約によるもので、結果としてタグが不正な形式になる
+
+**解決策**: `tag`ディレクティブを削除し、`rewrite_tag_filter`を使用してタグを再構築する
+
+```aconf
+# ❌ 悪い例: record_transformerのtagディレクティブで新しいフィールドを参照できない
+<filter nginx.access.**>
+  @type record_transformer
+  enable_ruby true
+  <record>
+    hostname "#{ENV['HOSTNAME'] || Socket.gethostname}"
+    customer_name ${record["customer_name"] || ENV["CUSTOMER_NAME"] || "default"}
+    fqdn ${tag_parts[2..-1].join('.')}
+    year ${Time.at(time).strftime("%Y")}
+  </record>
+  # このtagディレクティブは機能しない（record['hostname']などが参照できない）
+  tag "nginx.access.${record['hostname']}.${record['customer_name']}.${record['fqdn']}.${record['year']}"
+</filter>
+
+# ✅ 良い例: rewrite_tag_filterを使用してタグを再構築
+<filter nginx.access.**>
+  @type record_transformer
+  enable_ruby true
+  <record>
+    hostname "#{ENV['HOSTNAME'] || Socket.gethostname}"
+    customer_name ${record["customer_name"] || ENV["CUSTOMER_NAME"] || "default"}
+    fqdn ${tag_parts[2..-1].join('.')}
+    year ${Time.at(time).strftime("%Y")}
+  </record>
+</filter>
+
+# record_transformerの後にrewrite_tag_filterを追加
+<filter nginx.access.**>
+  @type rewrite_tag_filter
+  <rule>
+    key hostname
+    pattern /.+/
+    tag nginx.access.${record['hostname']}.${record['customer_name']}.${record['fqdn']}.${record['year']}
+  </rule>
+</filter>
+```
+
+**理由**:
+- `record_transformer`の`record`は元のイベントレコードを指す
+- 同じ`<record>`ブロック内で定義した新しいフィールドは、そのブロック内の`tag`ディレクティブでは参照できない
+- `rewrite_tag_filter`は、`record_transformer`で追加されたフィールドを参照できる
+- 2段階のフィルタリングにより、正しいタグを生成できる
+
+**参照**: PR #42 - Task 5.3: ログ転送機能の実装（Gemini Code Assistレビュー指摘）
+
+---
