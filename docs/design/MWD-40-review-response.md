@@ -51,10 +51,10 @@ PR #41に対するGemini Code Assistとユーザーからのレビューコメ�
 
 - [x] **9. OpenAppSecログのタグ設計**
   - ✅ タグ設計セクションを追加
-  - ✅ ホスト名、顧客名、FQDN名、年、月、日、時間、検知シグニチャを含むタグ構造を設計
+  - ✅ ホスト名、顧客名、FQDN名、signature、protectionName、ruleName、年、月、日、時間を含むタグ構造を設計
   - ✅ `record_transformer`プラグインの設定例を追加
-  - ✅ 検知シグニチャの正規化処理を追加
-  - ✅ タグ形式: `openappsec.detection.{hostname}.{customer_name}.{fqdn}.{year}.{month}.{day}.{hour}.{detected_signature}`
+  - ✅ signature、protectionName、ruleNameの正規化処理を追加
+  - ✅ タグ形式: `openappsec.detection.{hostname}.{customer_name}.{fqdn}.{signature}.{protectionName}.{ruleName}.{year}.{month}.{day}.{hour}`
 
 ## 追加対応項目
 

@@ -267,7 +267,7 @@ OpenAppSecのログJSONには、リクエストのホスト情報（FQDN）が�
   @type tail
   @id openappsec_detection
   path /var/log/nano_agent/*.log
-  pos_file /var/log/fluentd/openappsec.detection.pos
+  pos_file /var/log/fluentd/openappsec.detection.*.pos
   tag openappsec.detection
   <parse>
     @type json
@@ -302,7 +302,7 @@ OpenAppSecのログJSONには、リクエストのホスト情報（FQDN）が�
 # FQDN別のログファイル出力（オプション）
 <match openappsec.detection.**>
   @type file
-  path /var/log/nano_agent/${tag_parts[2]}/detection
+  path /var/log/fluentd/output/openappsec_fqdn/${tag_parts[2]}/detection
   append true
   <format>
     @type json
@@ -561,7 +561,7 @@ services:
   @type tail
   @id openappsec_detection
   path /var/log/nano_agent/*.log
-  pos_file /var/log/fluentd/openappsec.detection.pos
+  pos_file /var/log/fluentd/openappsec.detection.*.pos
   tag openappsec.detection
   <parse>
     @type json
