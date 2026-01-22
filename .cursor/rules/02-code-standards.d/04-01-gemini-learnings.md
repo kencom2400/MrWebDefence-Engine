@@ -11644,3 +11644,141 @@ log_format json_combined escape=json
 **参照**: PR #41 - Task 5.3: ログ転送機能実装（Gemini Code Assistレビュー指摘）
 
 ---
+
+### 24-7. Nginxログディレクトリの自動作成 🔴 Critical
+
+**問題**: Nginxは、ログファイルのパスに指定されたディレクトリが存在しない場合、起動またはリロードに失敗する。FQDN別のログディレクトリ（`/var/log/nginx/${fqdn}/`）が存在しない場合、新しいFQDNが追加された際にサービス影響が出る可能性がある
+
+**解決策**: 設定ファイル生成時にログディレクトリを自動作成する
+
+```bash
+# ❌ 悪い例: ディレクトリ作成処理がない
+local config_file="${output_dir}/${fqdn}.conf"
+# Nginx設定ファイルを生成（ディレクトリが存在しないと起動失敗）
+
+# ✅ 良い例: 設定ファイル生成前にディレクトリを作成
+local config_file="${output_dir}/${fqdn}.conf"
+# FQDN別ログディレクトリを作成（Nginx起動時に必要）
+local log_dir="/var/log/nginx/${fqdn}"
+if ! mkdir -p "$log_dir" 2>/dev/null; then
+    echo "⚠️  警告: ログディレクトリの作成に失敗しました: $log_dir" >&2
+    echo "⚠️  注意: docker-compose.ymlでNginxログボリュームがマウントされていることを確認してください" >&2
+else
+    echo "✅ ログディレクトリを作成しました: $log_dir"
+fi
+# Nginx設定ファイルを生成
+```
+
+**Docker Compose設定**:
+```yaml
+# config-agentにNginxログボリュームをマウント
+config-agent:
+  volumes:
+    - ./nginx/logs:/var/log/nginx:rw  # ログディレクトリ作成用
+```
+
+**理由**:
+- Nginxは起動時にログファイルのパスを検証する
+- ディレクトリが存在しない場合、起動またはリロードが失敗する
+- 設定ファイル生成時にディレクトリを作成することで、サービス影響を防ぐ
+
+**参照**: PR #42 - Task 5.3: ログ転送機能の実装（Gemini Code Assistレビュー指摘）
+
+---
+
+### 24-8. set -e環境でのjqコマンドのエラーハンドリング 🔴 High
+
+**問題**: `set -e`が有効な場合、`jq`コマンドが条件式の一部でないと、エラーでスクリプトが終了してしまい、後続のエラーハンドリングが実行されない
+
+**解決策**: コマンド置換を`if`文の条件式に含める
+
+```bash
+# ❌ 悪い例: set -eでエラー時にスクリプトが終了
+set -e
+customer_name=$(echo "$config_data" | jq -r '.customer_name // "default"')
+if [ $? -ne 0 ] || [ -z "$customer_name" ]; then
+    # この行に到達しない可能性がある
+    customer_name="default"
+fi
+
+# ✅ 良い例: if文の条件式にコマンド置換を含める
+set -e
+if ! customer_name=$(echo "$config_data" | jq -r '.customer_name // "default"'); then
+    echo "⚠️  警告: customer_nameの取得中にjqエラーが発生しました。デフォルト値を使用します" >&2
+    customer_name="default"
+elif [ -z "$customer_name" ] || [ "$customer_name" = "null" ]; then
+    echo "⚠️  警告: customer_nameが設定されていません。デフォルト値を使用します" >&2
+    customer_name="default"
+fi
+```
+
+**理由**:
+- `set -e`は条件式の一部として評価されるコマンドの失敗ではスクリプトを終了しない
+- `if`文の条件式にコマンド置換を含めることで、エラーハンドリングが確実に実行される
+- `null`値のチェックも追加することで、より堅牢なエラーハンドリングが可能
+
+**参照**: PR #42 - Task 5.3: ログ転送機能の実装（Gemini Code Assistレビュー指摘）
+
+---
+
+### 24-9. Fluentdのrecord_transformerでenable_rubyの明示的設定 🟡 Medium
+
+**問題**: `record_transformer`フィルターでRuby式（`${...}`）を使用する場合、`enable_ruby true`を明示的に設定しないと、可読性と将来の互換性に問題がある
+
+**解決策**: すべての`record_transformer`ブロックで`enable_ruby true`を明示的に設定する
+
+```aconf
+# ❌ 悪い例: enable_rubyが明示されていない
+<filter nginx.access.**>
+  @type record_transformer
+  <record>
+    customer_name ${record["customer_name"] || ENV["CUSTOMER_NAME"] || "default"}
+    year ${Time.at(time).strftime("%Y")}
+  </record>
+</filter>
+
+# ✅ 良い例: enable_rubyを明示的に設定
+<filter nginx.access.**>
+  @type record_transformer
+  enable_ruby true
+  <record>
+    customer_name ${record["customer_name"] || ENV["CUSTOMER_NAME"] || "default"}
+    year ${Time.at(time).strftime("%Y")}
+  </record>
+</filter>
+```
+
+**理由**:
+- Ruby式を使用していることが明確になる
+- 将来のFluentdバージョンでの互換性を確保
+- コードの可読性が向上
+
+**参照**: PR #42 - Task 5.3: ログ転送機能の実装（Gemini Code Assistレビュー指摘）
+
+---
+
+### 24-10. 生成済み設定ファイルの整合性確保 🔴 High
+
+**問題**: ジェネレータスクリプトを更新しても、既存の生成済み設定ファイルに変更が反映されていない場合がある
+
+**解決策**: ジェネレータスクリプト更新後は、必ず再実行して設定ファイルを更新する
+
+```bash
+# ❌ 悪い例: ジェネレータを更新したが、生成済みファイルを更新していない
+# config-agent/lib/nginx-config-generator.sh を更新
+# docker/nginx/conf.d/*.conf は古いまま
+
+# ✅ 良い例: ジェネレータ更新後、生成済みファイルも更新
+# 1. ジェネレータスクリプトを更新
+# 2. ジェネレータを再実行して設定ファイルを更新
+# 3. 生成されたファイルをコミット
+```
+
+**理由**:
+- 生成済みファイルが古いままだと、実際の動作と設計が乖離する
+- 特にログフォーマットや変数の追加など、重要な変更が反映されない可能性がある
+- ジェネレータ更新時は、必ず生成済みファイルも更新することを徹底する
+
+**参照**: PR #42 - Task 5.3: ログ転送機能の実装（Gemini Code Assistレビュー指摘）
+
+---

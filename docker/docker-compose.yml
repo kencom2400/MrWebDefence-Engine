@@ -143,6 +143,8 @@ services:
       - ./openappsec:/app/output/openappsec:rw
       # 出力先: Nginx設定ファイル
       - ./nginx/conf.d:/app/output/nginx/conf.d:rw
+      # Nginxログディレクトリ（FQDN別ディレクトリ作成用）
+      - ./nginx/logs:/var/log/nginx:rw
       # Dockerソケット（Nginxリロード用）
       # セキュリティ警告: Dockerソケットのマウントはセキュリティリスクがあります
       # 本番環境では、共有ボリューム上のシグナルファイルを監視する方法を検討してください
