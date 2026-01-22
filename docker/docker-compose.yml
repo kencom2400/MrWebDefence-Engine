@@ -173,7 +173,10 @@ services:
 
   fluentd:
     # Fluentdログ収集・転送サービス
-    image: fluent/fluentd:v1.16-debian-1
+    # カスタムイメージを使用（必要なプラグインをインストール済み）
+    build:
+      context: ./fluentd
+      dockerfile: Dockerfile
     container_name: mwd-fluentd
     volumes:
       # Fluentd設定ファイル

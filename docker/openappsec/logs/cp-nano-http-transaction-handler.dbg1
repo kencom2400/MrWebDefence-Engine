@@ -1,0 +1,71 @@
+[Thu Jan 22 05:18:53 UTC 2026][addStream@logging.cc:107                                     | ---] Successfully added log stream. Stream type: JSON FOG stream
+[init@components_list_impl.h:128                              | ---] Initializing component: Environment
+[init@components_list_impl.h:128                              | ---] Initializing component: DebugIS
+[2026-01-22T05:18:54.380256: : init@components_list_impl.h:128                            | ---] Initializing component: Version
+[2026-01-22T05:18:54.386034: : init@components_list_impl.h:128                            | ---] Initializing component: Buffer
+[2026-01-22T05:18:54.393436: : init@components_list_impl.h:128                            | ---] Initializing component: ShellCmd
+[2026-01-22T05:18:54.395078: : init@components_list_impl.h:128                            | ---] Initializing component: MetricScraper
+[2026-01-22T05:18:54.402915: : init@components_list_impl.h:128                            | ---] Initializing component: GenericMetric
+[2026-01-22T05:18:54.410281: : init@components_list_impl.h:128                            | ---] Initializing component: Messaging
+[2026-01-22T05:18:54.465071: : init@components_list_impl.h:128                            | ---] Initializing component: MainloopComponent
+[2026-01-22T05:18:54.477998: : init@components_list_impl.h:128                            | ---] Initializing component: ConfigComponent
+[2026-01-22T05:18:54.480912: : init@components_list_impl.h:128                            | ---] Initializing component: InstanceAwareness
+[2026-01-22T05:18:54.482304: : init@components_list_impl.h:128                            | ---] Initializing component: IntelligenceComponentV2
+[2026-01-22T05:18:54.483013: : init@components_list_impl.h:128                            | ---] Initializing component: AgentDetails
+[2026-01-22T05:18:54.572076: : getMachineTypeFromDmiTable@agent_details.cc:368            | ###] Error. Could not decode the DMI table. Table value is empty
+[2026-01-22T05:18:54.573204: : registerMachineType@agent_details.cc:390                   | ###] Error. Machine type is unrecognized
+[2026-01-22T05:18:54.575137: : registerMachineType@agent_details.cc:395                   | ---] Setting machine type 3
+[2026-01-22T05:18:54.582209: : init@components_list_impl.h:128                            | ---] Initializing component: LoggingComp
+[2026-01-22T05:18:54.583999: : init@components_list_impl.h:128                            | ---] Initializing component: TimeProxyComponent
+[2026-01-22T05:18:54.589130: : init@components_list_impl.h:128                            | ---] Initializing component: SignalHandler
+[2026-01-22T05:18:54.589903: : init@components_list_impl.h:128                            | ---] Initializing component: RestServer
+[2026-01-22T05:18:54.592952: : init@components_list_impl.h:128                            | ---] Initializing component: Encryptor
+[2026-01-22T05:18:54.598288: : init@components_list_impl.h:128                            | ---] Initializing component: SocketIS
+[2026-01-22T05:18:54.599029: : init@components_list_impl.h:128                            | ---] Initializing component: CPUCalculator
+[2026-01-22T05:18:54.599205: : init@components_list_impl.h:128                            | ---] Initializing component: CPUManager
+[2026-01-22T05:18:54.601440: : init@components_list_impl.h:128                            | ---] Initializing component: MemoryCalculator
+[2026-01-22T05:18:54.603414: : init@components_list_impl.h:128                            | ---] Initializing component: TenantManager
+[2026-01-22T05:18:54.605025: : init@components_list_impl.h:128                            | ---] Initializing component: GenericRulebase
+[2026-01-22T05:18:54.608066: : init@components_list_impl.h:128                            | ---] Initializing component: EnvDetails
+[2026-01-22T05:18:54.608874: : init@components_list_impl.h:128                            | ---] Initializing component: Table
+[2026-01-22T05:18:54.610418: : init@components_list_impl.h:128                            | ---] Initializing component: NginxAttachment
+[2026-01-22T05:18:54.640663: : init@nginx_attachment.cc:282                               | ---] Successfully initialized NGINX Attachment
+[2026-01-22T05:18:54.641510: : init@components_list_impl.h:128                            | ---] Initializing component: GradualDeployment
+[2026-01-22T05:18:54.646307: : init@components_list_impl.h:128                            | ---] Initializing component: HttpManager
+[2026-01-22T05:18:54.648471: : init@components_list_impl.h:128                            | ---] Initializing component: Layer-7 Access Control
+[2026-01-22T05:18:54.649752: : init@components_list_impl.h:128                            | ---] Initializing component: RateLimit
+[2026-01-22T05:18:54.653983: : init@components_list_impl.h:128                            | ---] Initializing component: WaapComponent
+[2026-01-22T05:18:55.206070: : SerializeToLocalAndRemoteSyncBase@Serializator.cc:548      | ---] Create SerializeToLocalAndRemoteSyncBase. assetId='', owner='ScannerDetector'
+[2026-01-22T05:18:55.206764: : SerializeToLocalAndRemoteSyncBase@Serializator.cc:558      | ###] shared storage host name(SHARED_STORAGE_HOST) is not set
+[2026-01-22T05:18:55.208579: : SerializeToLocalAndRemoteSyncBase@Serializator.cc:567      | ###] learning host name(SHARED_STORAGE_HOST) is not set
+[2026-01-22T05:18:55.210746: : SerializeToLocalAndRemoteSyncBase@Serializator.cc:548      | ---] Create SerializeToLocalAndRemoteSyncBase. assetId='', owner='ConfidenceCalculator'
+[2026-01-22T05:18:55.213441: : SerializeToLocalAndRemoteSyncBase@Serializator.cc:558      | ###] shared storage host name(SHARED_STORAGE_HOST) is not set
+[2026-01-22T05:18:55.215689: : SerializeToLocalAndRemoteSyncBase@Serializator.cc:567      | ###] learning host name(SHARED_STORAGE_HOST) is not set
+[2026-01-22T05:18:55.218044: : garbageCollector@ConfidenceCalculator.cc:1294              | ---] Owner: ConfidenceCalculator - starting asynchronous garbage collection of carry-on data files
+[2026-01-22T05:18:55.220548: : SerializeToLocalAndRemoteSyncBase@Serializator.cc:548      | ---] Create SerializeToLocalAndRemoteSyncBase. assetId='', owner='TrustedSourcesConfidenceCalculator'
+[2026-01-22T05:18:55.222438: : SerializeToLocalAndRemoteSyncBase@Serializator.cc:558      | ###] shared storage host name(SHARED_STORAGE_HOST) is not set
+[2026-01-22T05:18:55.222640: : SerializeToLocalAndRemoteSyncBase@Serializator.cc:567      | ###] learning host name(SHARED_STORAGE_HOST) is not set
+[2026-01-22T05:18:55.223235: : SerializeToLocalAndRemoteSyncBase@Serializator.cc:548      | ---] Create SerializeToLocalAndRemoteSyncBase. assetId='', owner='ConfidenceCalculator'
+[2026-01-22T05:18:55.223328: : SerializeToLocalAndRemoteSyncBase@Serializator.cc:558      | ###] shared storage host name(SHARED_STORAGE_HOST) is not set
+[2026-01-22T05:18:55.223467: : SerializeToLocalAndRemoteSyncBase@Serializator.cc:567      | ###] learning host name(SHARED_STORAGE_HOST) is not set
+[2026-01-22T05:18:55.223661: : garbageCollector@ConfidenceCalculator.cc:1294              | ---] Owner: ConfidenceCalculator - starting asynchronous garbage collection of carry-on data files
+[2026-01-22T05:18:55.223828: : SerializeToLocalAndRemoteSyncBase@Serializator.cc:548      | ---] Create SerializeToLocalAndRemoteSyncBase. assetId='', owner='TrustedSourcesConfidenceCalculator'
+[2026-01-22T05:18:55.223924: : SerializeToLocalAndRemoteSyncBase@Serializator.cc:558      | ###] shared storage host name(SHARED_STORAGE_HOST) is not set
+[2026-01-22T05:18:55.223999: : SerializeToLocalAndRemoteSyncBase@Serializator.cc:567      | ###] learning host name(SHARED_STORAGE_HOST) is not set
+[2026-01-22T05:18:55.224693: : SerializeToLocalAndRemoteSyncBase@Serializator.cc:548      | ---] Create SerializeToLocalAndRemoteSyncBase. assetId='', owner='State'
+[2026-01-22T05:18:55.224848: : SerializeToLocalAndRemoteSyncBase@Serializator.cc:558      | ###] shared storage host name(SHARED_STORAGE_HOST) is not set
+[2026-01-22T05:18:55.228240: : SerializeToLocalAndRemoteSyncBase@Serializator.cc:567      | ###] learning host name(SHARED_STORAGE_HOST) is not set
+[2026-01-22T05:18:55.238122: : registerStaticResource@nginx_attachment.cc:383             | ###] Failed to write the static resource to the shared memory. Resource name: cp-ab.js, static resource's path: /etc/cp/conf/waap/cp-ab.js
+[2026-01-22T05:18:55.238334: : registerStaticResource@nginx_attachment.cc:383             | ###] Failed to write the static resource to the shared memory. Resource name: cp-csrf.js, static resource's path: /etc/cp/conf/waap/cp-csrf.js
+[2026-01-22T05:18:55.238534: : init@components_list_impl.h:128                            | ---] Initializing component: IPSComp
+[2026-01-22T05:18:55.238873: : init@components_list_impl.h:128                            | ---] Initializing component: KeywordComp
+[2026-01-22T05:18:55.239887: : init@components_list_impl.h:128                            | ---] Initializing component: GeoLocation
+[2026-01-22T05:18:55.241450: : initGeoDbObj@geo_location.cc:109                           | ###] maxMindDB error: Error opening the specified MaxMind DB file
+[2026-01-22T05:18:55.241647: : init@components_list_impl.h:128                            | ---] Initializing component: HttpGeoFilter
+[2026-01-22T05:18:55.242523: : run@mainloop.cc:244                                        | ---] Starting the Mainloop
+[2026-01-22T05:18:55.244845: : <14> operator()@rest_server.cc:299                         | ---] REST server started: 12000. Accepting: loopback connections
+[2026-01-22T05:18:55.364359: : <5> reportStartupEvent@mainloop.cc:229                     | ---] Startup report was successfully sent to fog
+[2026-01-22T05:18:55.375427: : <12> setupAlternateSignalStack@signal_handler.cc:272       | ---] Alternate stack allocated successfully. Allocated size: 1048576
+[2026-01-22T05:18:55.448082: : <10> closeLogFile@file_stream.cc:119                       | ###] Failed in closing log file. File path: 1
+[2026-01-22T05:18:57.484613: : <4> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: Handling in-memory messages, time slice: 1500, exceeded time: 194098 microseconds
+[2026-01-22T05:18:58.347624: : <4> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: Handling in-memory messages, time slice: 1500, exceeded time: 340721 microseconds

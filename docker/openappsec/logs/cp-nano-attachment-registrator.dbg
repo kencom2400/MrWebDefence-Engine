@@ -1,0 +1,174 @@
+[readAgentDetails@agent_details.cc:101                        | ###] Agent details file does not exist. File: /etc/cp/conf/agent_details.json
+[addStream@logging.cc:107                                     | ---] Successfully added log stream. Stream type: JSON Debug stream
+[addStream@logging.cc:107                                     | ---] Successfully added log stream. Stream type: JSON FOG stream
+[init@components_list_impl.h:128                              | ---] Initializing component: Environment
+[init@components_list_impl.h:128                              | ---] Initializing component: DebugIS
+[2026-01-22T04:31:29.640144: : init@components_list_impl.h:128                            | ---] Initializing component: Version
+[2026-01-22T04:31:29.641555: : init@components_list_impl.h:128                            | ---] Initializing component: Buffer
+[2026-01-22T04:31:29.641730: : init@components_list_impl.h:128                            | ---] Initializing component: ShellCmd
+[2026-01-22T04:31:29.641915: : init@components_list_impl.h:128                            | ---] Initializing component: MetricScraper
+[2026-01-22T04:31:29.642223: : init@components_list_impl.h:128                            | ---] Initializing component: GenericMetric
+[2026-01-22T04:31:29.642391: : init@components_list_impl.h:128                            | ---] Initializing component: Messaging
+[2026-01-22T04:31:29.654193: : init@components_list_impl.h:128                            | ---] Initializing component: MainloopComponent
+[2026-01-22T04:31:29.655193: : init@components_list_impl.h:128                            | ---] Initializing component: ConfigComponent
+[2026-01-22T04:31:29.655812: : init@components_list_impl.h:128                            | ---] Initializing component: InstanceAwareness
+[2026-01-22T04:31:29.659676: : init@components_list_impl.h:128                            | ---] Initializing component: IntelligenceComponentV2
+[2026-01-22T04:31:29.660169: : init@components_list_impl.h:128                            | ---] Initializing component: AgentDetails
+[2026-01-22T04:31:29.684114: : getMachineTypeFromDmiTable@agent_details.cc:368            | ###] Error. Could not decode the DMI table. Table value is empty
+[2026-01-22T04:31:29.684509: : registerMachineType@agent_details.cc:390                   | ###] Error. Machine type is unrecognized
+[2026-01-22T04:31:29.686433: : registerMachineType@agent_details.cc:395                   | ---] Setting machine type 3
+[2026-01-22T04:31:29.688277: : loadAccessToken@agent_details.cc:344                       | ###] Failed to open session token file: /etc/cp/data/data3.a
+[2026-01-22T04:31:29.690344: : init@components_list_impl.h:128                            | ---] Initializing component: LoggingComp
+[2026-01-22T04:31:29.691238: : init@components_list_impl.h:128                            | ---] Initializing component: TimeProxyComponent
+[2026-01-22T04:31:29.691480: : init@components_list_impl.h:128                            | ---] Initializing component: SignalHandler
+[2026-01-22T04:31:29.691898: : init@components_list_impl.h:128                            | ---] Initializing component: RestServer
+[2026-01-22T04:31:29.693249: : init@components_list_impl.h:128                            | ---] Initializing component: Encryptor
+[2026-01-22T04:31:29.693390: : init@components_list_impl.h:128                            | ---] Initializing component: SocketIS
+[2026-01-22T04:31:29.693475: : init@components_list_impl.h:128                            | ---] Initializing component: CPUCalculator
+[2026-01-22T04:31:29.693682: : init@components_list_impl.h:128                            | ---] Initializing component: CPUManager
+[2026-01-22T04:31:29.694734: : init@components_list_impl.h:128                            | ---] Initializing component: MemoryCalculator
+[2026-01-22T04:31:29.696109: : init@components_list_impl.h:128                            | ---] Initializing component: TenantManager
+[2026-01-22T04:31:29.697738: : init@components_list_impl.h:128                            | ---] Initializing component: GenericRulebase
+[2026-01-22T04:31:29.698429: : init@components_list_impl.h:128                            | ---] Initializing component: EnvDetails
+[2026-01-22T04:31:29.699917: : init@components_list_impl.h:128                            | ---] Initializing component: AttachmentRegistrator
+[2026-01-22T04:31:29.705774: : run@mainloop.cc:244                                        | ---] Starting the Mainloop
+[2026-01-22T04:31:29.708709: : <14> operator()@rest_server.cc:299                         | ---] REST server started: 8124. Accepting: loopback connections
+[2026-01-22T04:31:29.749859: : <9> loadAccessToken@agent_details.cc:344                   | ###] Failed to open session token file: /etc/cp/data/data3.a
+[2026-01-22T04:31:29.769078: : <5> reportStartupEvent@mainloop.cc:229                     | ---] Startup report was successfully sent to fog
+[2026-01-22T04:31:29.774394: : <10> sendLog@debug_stream.cc:33                            | ---] {
+    "eventTime": "2026-01-22T04:31:29.701",
+    "eventName": "Check Point Nano-service started",
+    "eventSeverity": "Info",
+    "eventPriority": "Medium",
+    "eventType": "Event Driven",
+    "eventLevel": "Log",
+    "eventLogLevel": "info",
+    "eventAudience": "Security",
+    "eventAudienceTeam": "",
+    "eventFrequency": 0,
+    "eventTags": [
+        "Informational"
+    ],
+    "eventSource": {
+        "agentId": "Unknown",
+        "eventTraceId": "",
+        "eventSpanId": "",
+        "issuingEngineVersion": "1.1.32-open-source",
+        "serviceName": "Attachment Registration Manager"
+    },
+    "eventData": {
+        "logIndex": 1,
+        "serviceName": "Attachment Registration Manager"
+    }
+}
+[2026-01-22T04:31:29.777610: : <12> setupAlternateSignalStack@signal_handler.cc:272       | ---] Alternate stack allocated successfully. Allocated size: 1048576
+[2026-01-22T04:31:33.296378: : <4> canWriteToDisk@messaging_buffer_comp.cc:625            | ###] Failed to get directory size. Unable to open directory: /var/log/nano_agent/event_buffer/
+[2026-01-22T04:31:33.304926: : <4> canWriteToDisk@messaging_buffer_comp.cc:625            | ###] Failed to get directory size. Unable to open directory: /var/log/nano_agent/event_buffer/
+[2026-01-22T04:31:44.982856: : <25> tryToBioConnect@connection.cc:518                     | ###] Connection to: 127.0.0.1:7778 failed and won't retry. Error: error:8000006F:system library::Connection refused
+[2026-01-22T04:31:44.998785: : <25> connectToHost@connection.cc:577                       | ###] Connection to: 127.0.0.1:7778 failed and will be suspended for 60 seconds
+[2026-01-22T04:31:44.998970: : <25> establishConnection@connection.cc:201                 | ###] Failed to connect to host: 127.0.0.1:7778. There won't be a retry attempt.
+[2026-01-22T04:31:44.999461: : <25> establishNewConnection@connection_comp.cc:106         | ###] Failed to establish connection. Error: 127.0.0.1:7778. There won't be a retry attempt.
+[2026-01-22T04:31:44.999892: : <25> getConnection@messaging_comp.cc:109                   | ###] Failed to establish connection. Error: 127.0.0.1:7778. There won't be a retry attempt.
+[2026-01-22T04:31:45.000222: : <25> sendMessage@messaging_comp.cc:125                     | ###] Failed to get connection. Error: Failed to establish connection. Error: 127.0.0.1:7778. There won't be a retry attempt.
+[2026-01-22T04:31:45.000876: : <25> getAllTenants@tenant_manager.cc:256                   | ###] Failed to get all active tenants. Error: Failed to establish connection. Error: 127.0.0.1:7778. There won't be a retry attempt.
+[2026-01-22T04:31:45.122284: : <25> load@triggers_config.cc:205                           | ###] Failed to parse the extendLoggingMinSeverityfield: 'high'
+[2026-01-22T04:31:45.123685: : <25> openLogFile@file_stream.cc:101                        | ---] Empty log file name, no log file will be written
+[2026-01-22T04:31:45.123859: : <25> addStream@logging.cc:107                              | ---] Successfully added log stream. Stream type: JSON File stream
+[2026-01-22T04:31:45.141634: : <25> addStream@logging.cc:107                              | ---] Successfully added log stream. Stream type: JSON Debug stream
+[2026-01-22T04:31:45.141925: : <25> addStream@logging.cc:107                              | ---] Successfully added log stream. Stream type: JSON FOG stream
+[2026-01-22T04:35:42.084784: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 103954 microseconds
+[2026-01-22T04:35:47.219309: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 130442 microseconds
+[2026-01-22T04:36:27.665878: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 113691 microseconds
+[2026-01-22T04:36:58.095045: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 129071 microseconds
+[2026-01-22T04:38:24.123224: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 118169 microseconds
+[2026-01-22T04:39:04.693266: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 109906 microseconds
+[2026-01-22T04:39:19.915920: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 105592 microseconds
+[2026-01-22T04:39:25.028256: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 104893 microseconds
+[2026-01-22T04:41:01.396287: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 120957 microseconds
+[2026-01-22T04:41:30.012547: : <7> sendOrchestatorConfMsg@config.cc:218                   | ###] Could not send configuration to orchestrator 7777, error: Failed to parse response body. Body: 
+, error-code: 0
+[2026-01-22T04:41:30.013179: : <7> sendData@connection.cc:616                             | ###] Failed to write data into BIO socket. Error: error:1000006E:BIO routines::nbio connect error
+[2026-01-22T04:41:30.013944: : <7> tryToBioConnect@connection.cc:518                      | ###] Connection to: 127.0.0.1:7778 failed and won't retry. Error: error:8000006F:system library::Connection refused
+[2026-01-22T04:41:30.062393: : <7> connectToHost@connection.cc:577                        | ###] Connection to: 127.0.0.1:7778 failed and will be suspended for 60 seconds
+[2026-01-22T04:41:30.065515: : <7> establishConnection@connection.cc:201                  | ###] Failed to connect to host: 127.0.0.1:7778. There won't be a retry attempt.
+[2026-01-22T04:41:30.065749: : <7> sendData@connection.cc:616                             | ###] Failed to write data into BIO socket. Error: error:1000006E:BIO routines::nbio connect error
+[2026-01-22T04:41:30.068809: : <7> sendOrchestatorConfMsg@config.cc:239                   | ###] Could not send configuration to orchestrator 7778, error: Failed to write data into BIO socket. Error: error:1000006E:BIO routines::nbio connect error, error-code: -1
+[2026-01-22T04:42:37.376595: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 108218 microseconds
+[2026-01-22T04:43:38.304021: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 101547 microseconds
+[2026-01-22T04:43:58.665257: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 118677 microseconds
+[2026-01-22T04:44:39.168376: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 141942 microseconds
+[2026-01-22T04:46:15.254804: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 138059 microseconds
+[2026-01-22T04:48:06.472136: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 107979 microseconds
+[2026-01-22T04:48:15.221105: : <22> run@mainloop.cc:325                                   | ###] Routine execution exceeded run time. Routine name: Attachment's registration handler, time slice: 1500, exceeded time: 153739 microseconds
+[2026-01-22T04:50:03.014902: : <3> getExecOutputAndCode@shell_cmd.cc:89                   | ###] Reached timeout while executing shell command: if [ -s /var/log/nano_agent/event_buffer//cp-nano-attachment-registrator.input ] && [ ! -s /var/log/nano_agent/event_buffer//cp-nano-attachment-registrator.output ];then mv /var/log/nano_agent/event_buffer//cp-nano-attachment-registrator.input /var/log/nano_agent/event_buffer//cp-nano-attachment-registrator.output;fi
+[2026-01-22T04:50:03.041843: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 460156 microseconds
+[2026-01-22T04:50:08.159095: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 114395 microseconds
+[2026-01-22T04:50:23.425045: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 127451 microseconds
+[2026-01-22T04:50:53.814785: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 111402 microseconds
+[2026-01-22T04:53:05.269053: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 108613 microseconds
+[2026-01-22T04:53:20.548299: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 175249 microseconds
+[2026-01-22T04:53:30.778447: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 126437 microseconds
+[2026-01-22T04:53:35.905442: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 121427 microseconds
+[2026-01-22T04:53:46.083077: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 126067 microseconds
+[2026-01-22T04:54:01.272844: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 131969 microseconds
+[2026-01-22T04:54:41.734132: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 111243 microseconds
+[2026-01-22T04:54:51.893669: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 118772 microseconds
+[2026-01-22T04:54:57.005094: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 104203 microseconds
+[2026-01-22T04:56:18.055339: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 103679 microseconds
+[2026-01-22T04:56:58.646398: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 182619 microseconds
+[2026-01-22T04:57:13.895735: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 105641 microseconds
+[2026-01-22T04:57:49.398320: : <3> getExecOutputAndCode@shell_cmd.cc:89                   | ###] Reached timeout while executing shell command: if [ -s /var/log/nano_agent/event_buffer//cp-nano-attachment-registrator.input ] && [ ! -s /var/log/nano_agent/event_buffer//cp-nano-attachment-registrator.output ];then mv /var/log/nano_agent/event_buffer//cp-nano-attachment-registrator.input /var/log/nano_agent/event_buffer//cp-nano-attachment-registrator.output;fi
+[2026-01-22T04:57:49.428507: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 316428 microseconds
+[2026-01-22T04:57:54.622037: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 187439 microseconds
+[2026-01-22T04:57:59.794666: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 104754 microseconds
+[2026-01-22T04:58:40.415881: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 114697 microseconds
+[2026-01-22T04:59:00.688211: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 114975 microseconds
+[2026-01-22T04:59:15.931515: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 137251 microseconds
+[2026-01-22T04:59:21.044651: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 111387 microseconds
+[2026-01-22T04:59:26.156349: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 103089 microseconds
+[2026-01-22T04:59:36.345127: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 121962 microseconds
+[2026-01-22T04:59:56.700048: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 116206 microseconds
+[2026-01-22T05:00:01.839895: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 132614 microseconds
+[2026-01-22T05:00:52.383154: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 129697 microseconds
+[2026-01-22T05:00:57.549523: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 125838 microseconds
+[2026-01-22T05:01:53.233864: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 106401 microseconds
+[2026-01-22T05:02:28.799836: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 176021 microseconds
+[2026-01-22T05:03:39.609474: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 144117 microseconds
+[2026-01-22T05:04:40.470711: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 143901 microseconds
+[2026-01-22T05:05:56.305706: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 100843 microseconds
+[2026-01-22T05:07:37.467589: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 109871 microseconds
+[2026-01-22T05:07:47.648635: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 127590 microseconds
+[2026-01-22T05:08:23.024527: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 140964 microseconds
+[2026-01-22T05:08:58.488452: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 120186 microseconds
+[2026-01-22T05:11:10.263942: : <3> getExecOutputAndCode@shell_cmd.cc:89                   | ###] Reached timeout while executing shell command: if [ -s /var/log/nano_agent/event_buffer//cp-nano-attachment-registrator.input ] && [ ! -s /var/log/nano_agent/event_buffer//cp-nano-attachment-registrator.output ];then mv /var/log/nano_agent/event_buffer//cp-nano-attachment-registrator.input /var/log/nano_agent/event_buffer//cp-nano-attachment-registrator.output;fi
+[2026-01-22T05:11:10.269090: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 387135 microseconds
+[2026-01-22T05:12:00.967331: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 175844 microseconds
+[2026-01-22T05:12:06.238804: : <3> getExecOutputAndCode@shell_cmd.cc:89                   | ###] Reached timeout while executing shell command: if [ -s /var/log/nano_agent/event_buffer//cp-nano-attachment-registrator.input ] && [ ! -s /var/log/nano_agent/event_buffer//cp-nano-attachment-registrator.output ];then mv /var/log/nano_agent/event_buffer//cp-nano-attachment-registrator.input /var/log/nano_agent/event_buffer//cp-nano-attachment-registrator.output;fi
+[2026-01-22T05:12:06.240969: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 268822 microseconds
+[2026-01-22T05:12:11.369155: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 123011 microseconds
+[2026-01-22T05:12:16.472728: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 100600 microseconds
+[2026-01-22T05:12:56.976146: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 116431 microseconds
+[2026-01-22T05:14:02.691291: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 112862 microseconds
+[2026-01-22T05:14:43.337471: : <3> getExecOutputAndCode@shell_cmd.cc:89                   | ###] Reached timeout while executing shell command: if [ -s /var/log/nano_agent/event_buffer//cp-nano-attachment-registrator.input ] && [ ! -s /var/log/nano_agent/event_buffer//cp-nano-attachment-registrator.output ];then mv /var/log/nano_agent/event_buffer//cp-nano-attachment-registrator.input /var/log/nano_agent/event_buffer//cp-nano-attachment-registrator.output;fi
+[2026-01-22T05:14:43.493574: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 551519 microseconds
+[2026-01-22T05:14:53.642229: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 103359 microseconds
+[2026-01-22T05:14:58.834846: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 185670 microseconds
+[2026-01-22T05:17:25.670060: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 110685 microseconds
+[2026-01-22T05:18:01.215336: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 107144 microseconds
+[2026-01-22T05:18:31.574494: : <3> run@mainloop.cc:325                                    | ###] Routine execution exceeded run time. Routine name: A-sync messaging routine, time slice: 1500, exceeded time: 101852 microseconds
+[2026-01-22T05:18:46.405617: : <22> getExecOutputAndCode@shell_cmd.cc:89                  | ###] Reached timeout while executing shell command: /etc/cp/watchdog/cp-nano-watchdog --register /etc/cp/HttpTransactionHandler/cp-nano-http-transaction-handler --count 10
+[2026-01-22T05:18:46.409569: : <22> registerAttachmentProcess@attachment_registrator.cc:102 | ###] Failed to register attachment.Attachment Type: 0, Attachment id: , Family id: , Total number of instances: 
+
+[2026-01-22T05:18:46.409872: : <22> run@mainloop.cc:325                                   | ###] Routine execution exceeded run time. Routine name: Attachment's registration handler, time slice: 1500, exceeded time: 1435147 microseconds
+[2026-01-22T05:18:47.690376: : <22> getExecOutputAndCode@shell_cmd.cc:89                  | ###] Reached timeout while executing shell command: /etc/cp/watchdog/cp-nano-watchdog --register /etc/cp/HttpTransactionHandler/cp-nano-http-transaction-handler --count 10
+[2026-01-22T05:18:47.691244: : <22> registerAttachmentProcess@attachment_registrator.cc:102 | ###] Failed to register attachment.Attachment Type: 0, Attachment id: , Family id: , Total number of instances: 
+
+[2026-01-22T05:18:47.691381: : <22> run@mainloop.cc:325                                   | ###] Routine execution exceeded run time. Routine name: Attachment's registration handler, time slice: 1360, exceeded time: 1280044 microseconds
+[2026-01-22T05:18:48.732081: : <22> getExecOutputAndCode@shell_cmd.cc:89                  | ###] Reached timeout while executing shell command: /etc/cp/watchdog/cp-nano-watchdog --register /etc/cp/HttpTransactionHandler/cp-nano-http-transaction-handler --count 10
+[2026-01-22T05:18:48.734154: : <22> registerAttachmentProcess@attachment_registrator.cc:102 | ###] Failed to register attachment.Attachment Type: 0, Attachment id: , Family id: , Total number of instances: 
+
+[2026-01-22T05:18:48.737743: : <22> run@mainloop.cc:325                                   | ###] Routine execution exceeded run time. Routine name: Attachment's registration handler, time slice: 1220, exceeded time: 1045044 microseconds
+[2026-01-22T05:18:49.945097: : <22> getExecOutputAndCode@shell_cmd.cc:89                  | ###] Reached timeout while executing shell command: /etc/cp/watchdog/cp-nano-watchdog --register /etc/cp/HttpTransactionHandler/cp-nano-http-transaction-handler --count 10
+[2026-01-22T05:18:49.950733: : <22> registerAttachmentProcess@attachment_registrator.cc:102 | ###] Failed to register attachment.Attachment Type: 0, Attachment id: , Family id: , Total number of instances: 
+
+[2026-01-22T05:18:49.954507: : <22> run@mainloop.cc:325                                   | ###] Routine execution exceeded run time. Routine name: Attachment's registration handler, time slice: 1080, exceeded time: 1214005 microseconds
