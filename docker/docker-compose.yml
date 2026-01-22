@@ -179,8 +179,13 @@ services:
       dockerfile: Dockerfile
     container_name: mwd-fluentd
     volumes:
-      # Fluentd設定ファイル
+      # Fluentd設定ファイル（メイン設定）
       - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf:ro
+      # Fluentd設定ファイル（モジュール化された設定）
+      - ./fluentd/in.d:/fluentd/etc/in.d:ro
+      - ./fluentd/process.d:/fluentd/etc/process.d:ro
+      - ./fluentd/forwarder.d:/fluentd/etc/forwarder.d:ro
+      - ./fluentd/archive.d:/fluentd/etc/archive.d:ro
       # Nginxログ（共有ボリューム方式の場合、読み取り専用）
       - ./nginx/logs:/var/log/nginx:ro
       # OpenAppSecログ（共有ボリューム方式の場合、読み取り専用）
