@@ -11890,3 +11890,72 @@ fi
 **参照**: PR #42 - Task 5.3: ログ転送機能の実装（Gemini Code Assistレビュー指摘）
 
 ---
+
+### 24-14. FluentdのFQDN別ログファイルパス生成 🔴 High
+
+**問題**: FQDN別のログファイルパスを生成する際に、`tag_parts[2]`を使用すると、サブドメイン（`test.example.com`）の場合に不完全なディレクトリ名（`test`）が作成される
+
+**解決策**: `tag_parts[2..-1].join('.')`を使用してFQDN全体を取得する
+
+```aconf
+# ❌ 悪い例: サブドメインの場合に不完全なディレクトリ名が作成される
+<match openappsec.detection.**>
+  @type file
+  path /var/log/fluentd/output/openappsec_fqdn/${tag_parts[2]}/detection
+  # test.example.com → test のみ（不完全）
+</match>
+
+# ✅ 良い例: FQDN全体を取得
+<match openappsec.detection.**>
+  @type file
+  path /var/log/fluentd/output/openappsec_fqdn/${tag_parts[2..-1].join('.')}/detection
+  # test.example.com → test.example.com 全体
+</match>
+```
+
+**理由**:
+- タグが `openappsec.detection.test.example.com` の場合、`tag_parts` は `['openappsec', 'detection', 'test', 'example', 'com']` となる
+- `tag_parts[2]` は `"test"` のみを返す
+- `tag_parts[2..-1].join('.')` で `"test.example.com"` 全体を取得できる
+
+**参照**: PR #42 - Task 5.3: ログ転送機能の実装（Gemini Code Assistレビュー指摘）
+
+---
+
+### 24-15. ログレコードに含まれないフィールドの設計上の制約 🟡 Medium
+
+**問題**: 一部のログ（Nginxエラーログ、OpenAppSec検知ログ）には`customer_name`が含まれていないため、環境変数またはデフォルト値にフォールバックする必要がある
+
+**解決策**: 設計上の制約をコメントで明記し、将来的な改善案を記載する
+
+```aconf
+# ❌ 悪い例: 設計上の制約が不明確
+<filter nginx.error.**>
+  @type record_transformer
+  <record>
+    customer_name ${record["customer_name"] || ENV["CUSTOMER_NAME"] || "default"}
+    # なぜ常にデフォルト値になるのか不明
+  </record>
+</filter>
+
+# ✅ 良い例: 設計上の制約を明記
+<filter nginx.error.**>
+  @type record_transformer
+  <record>
+    # 注意: Nginxエラーログにはcustomer_nameが含まれていないため、
+    # 環境変数ENV["CUSTOMER_NAME"]またはデフォルト値"default"にフォールバックします
+    # これにより、エラーが発生したリクエスト固有の顧客名を特定できなくなります
+    # 将来的に、FQDNと顧客名をマッピングする仕組みを導入することを検討してください
+    customer_name ${record["customer_name"] || ENV["CUSTOMER_NAME"] || "default"}
+  </record>
+</filter>
+```
+
+**理由**:
+- 設計上の制約を明記することで、実装者やレビュアーが理解しやすくなる
+- 将来的な改善案を記載することで、技術的負債を明確化できる
+- ログの精度に影響する重要な点であることを認識できる
+
+**参照**: PR #42 - Task 5.3: ログ転送機能の実装（Gemini Code Assistレビュー指摘）
+
+---
