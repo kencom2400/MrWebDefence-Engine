@@ -4,7 +4,9 @@
 # Fluentdによるログ転送機能が正常に動作しているか確認します
 # CI環境でも実行可能で、成功/失敗を明確に判定できます
 
-set -euo pipefail
+set -uo pipefail
+# 注意: set -e は使用しない（エラーカウントを集計するため）
+# 重要なエラーは明示的に exit 1 で終了する
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
