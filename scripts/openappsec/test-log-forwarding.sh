@@ -2,14 +2,43 @@
 
 # ログ転送機能動作確認スクリプト
 # Fluentdによるログ転送機能が正常に動作しているか確認します
+# CI環境でも実行可能で、成功/失敗を明確に判定できます
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 DOCKER_DIR="${REPO_ROOT}/docker"
 
+# docker-composeコマンドの互換性対応
+if command -v docker-compose >/dev/null 2>&1; then
+    DOCKER_COMPOSE_CMD="docker-compose"
+elif docker compose version >/dev/null 2>&1; then
+    DOCKER_COMPOSE_CMD="docker compose"
+else
+    echo "❌ エラー: docker-compose または docker compose が見つかりません" >&2
+    exit 1
+fi
+
 cd "$DOCKER_DIR"
+
+# テスト結果のカウント
+ERROR_COUNT=0
+WARNING_COUNT=0
+SUCCESS_COUNT=0
+
+# エラーカウント関数
+increment_error() {
+    ERROR_COUNT=$((ERROR_COUNT + 1))
+}
+
+increment_warning() {
+    WARNING_COUNT=$((WARNING_COUNT + 1))
+}
+
+increment_success() {
+    SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+}
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  ログ転送機能 動作確認"
@@ -22,19 +51,23 @@ FQDNS=("test.example.com" "example1.com" "example2.com" "example3.com")
 # 1. Fluentdコンテナの状態確認
 echo "📋 1. Fluentdコンテナの状態確認"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-if docker-compose ps fluentd | grep -q "Up"; then
+if $DOCKER_COMPOSE_CMD ps fluentd 2>/dev/null | grep -q "Up"; then
     echo "✅ Fluentdコンテナが起動しています"
+    increment_success
     
     # Fluentdのヘルスチェック
     echo "🔄 Fluentdのヘルスチェック中..."
-    if docker-compose exec -T fluentd fluentd --version > /dev/null 2>&1; then
+    if $DOCKER_COMPOSE_CMD exec -T fluentd fluentd --version > /dev/null 2>&1; then
         echo "✅ Fluentdが正常に動作しています"
+        increment_success
     else
         echo "⚠️  Fluentdのバージョン確認に失敗しました（コンテナ内で確認）"
+        increment_warning
     fi
 else
     echo "❌ Fluentdコンテナが起動していません"
-    echo "   起動してください: docker-compose up -d fluentd"
+    echo "   起動してください: $DOCKER_COMPOSE_CMD up -d fluentd"
+    increment_error
     exit 1
 fi
 echo ""
@@ -44,16 +77,20 @@ echo "📋 2. Fluentd設定ファイルの確認"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 if [ -f "./fluentd/fluent.conf" ]; then
     echo "✅ Fluentd設定ファイルが存在します"
+    increment_success
     
     # 設定ファイルの構文チェック（可能な場合）
     echo "🔄 設定ファイルの構文チェック中..."
-    if docker-compose exec -T fluentd fluentd --dry-run -c /fluentd/etc/fluent.conf > /dev/null 2>&1; then
+    if $DOCKER_COMPOSE_CMD exec -T fluentd fluentd --dry-run -c /fluentd/etc/fluent.conf > /dev/null 2>&1; then
         echo "✅ Fluentd設定ファイルの構文は正常です"
+        increment_success
     else
         echo "⚠️  設定ファイルの構文チェックに失敗しました（コンテナ内で確認）"
+        increment_warning
     fi
 else
     echo "❌ Fluentd設定ファイルが見つかりません: ./fluentd/fluent.conf"
+    increment_error
     exit 1
 fi
 echo ""
@@ -123,24 +160,30 @@ echo ""
 # 4. ログ生成テスト（HTTPリクエストを送信）
 echo "📋 4. ログ生成テスト（HTTPリクエストを送信）"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+HTTP_TEST_FAILED=0
 for fqdn in "${FQDNS[@]}"; do
     echo "テスト: ${fqdn}"
     
     # ヘルスチェックエンドポイント
-    if curl -s -H "Host: ${fqdn}" http://localhost/health > /dev/null; then
+    if curl -s -m 5 -H "Host: ${fqdn}" http://localhost/health > /dev/null 2>&1; then
         echo "  ✅ ヘルスチェック: OK"
+        increment_success
     else
         echo "  ❌ ヘルスチェック: 失敗"
+        increment_error
+        HTTP_TEST_FAILED=1
     fi
     
     # 通常のリクエスト
-    response=$(curl -s -w "\n%{http_code}" -H "Host: ${fqdn}" http://localhost/ 2>/dev/null || echo -e "\n000")
+    response=$(curl -s -m 5 -w "\n%{http_code}" -H "Host: ${fqdn}" http://localhost/ 2>/dev/null || echo -e "\n000")
     http_code=$(echo "$response" | tail -n1)
     
     if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 400 ]; then
         echo "  ✅ HTTPリクエスト: OK (HTTP $http_code)"
+        increment_success
     else
         echo "  ⚠️  HTTPリクエスト: HTTP $http_code"
+        increment_warning
     fi
 done
 
@@ -152,6 +195,7 @@ echo ""
 # 5. NginxログのJSON形式確認
 echo "📋 5. NginxログのJSON形式確認"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+JSON_LOG_CHECK_FAILED=0
 for fqdn in "${FQDNS[@]}"; do
     access_log="./nginx/logs/${fqdn}/access.log"
     if [ -f "$access_log" ] && [ -s "$access_log" ]; then
@@ -164,30 +208,39 @@ for fqdn in "${FQDNS[@]}"; do
             # JSON形式かどうかを確認
             if echo "$latest_log" | jq empty > /dev/null 2>&1; then
                 echo "  ✅ JSON形式のログが正しく出力されています"
+                increment_success
                 
                 # 必須フィールドの確認
                 if echo "$latest_log" | jq -e '.time, .host, .status' > /dev/null 2>&1; then
                     echo "  ✅ 必須フィールド（time, host, status）が含まれています"
+                    increment_success
                 else
                     echo "  ⚠️  必須フィールドが不足している可能性があります"
+                    increment_warning
                 fi
                 
                 # customer_nameフィールドの確認
                 if echo "$latest_log" | jq -e '.customer_name' > /dev/null 2>&1; then
                     customer_name=$(echo "$latest_log" | jq -r '.customer_name')
                     echo "  ✅ customer_nameフィールドが含まれています: ${customer_name}"
+                    increment_success
                 else
                     echo "  ⚠️  customer_nameフィールドが見つかりません"
+                    increment_warning
                 fi
             else
                 echo "  ❌ JSON形式のログではありません"
                 echo "     最新のログエントリ: ${latest_log:0:100}..."
+                increment_error
+                JSON_LOG_CHECK_FAILED=1
             fi
         else
             echo "  ⚠️  ログエントリが見つかりません"
+            increment_warning
         fi
     else
         echo "確認: ${fqdn} - ログファイルが見つかりません"
+        increment_warning
     fi
 done
 echo ""
@@ -198,7 +251,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 # Fluentdのログを確認
 echo "Fluentdコンテナのログ（最新20行）:"
-docker-compose logs --tail=20 fluentd | grep -E "(nginx|openappsec|error|warn)" || echo "  関連ログが見つかりません"
+$DOCKER_COMPOSE_CMD logs --tail=20 fluentd 2>/dev/null | grep -E "(nginx|openappsec|error|warn)" || echo "  関連ログが見つかりません"
 echo ""
 
 # pos_fileの確認
@@ -206,8 +259,10 @@ if [ -d "./fluentd/log" ]; then
     pos_file_count=$(find ./fluentd/log -name "*.pos" -type f 2>/dev/null | wc -l | tr -d ' ')
     if [ "$pos_file_count" -gt 0 ]; then
         echo "✅ pos_file: ${pos_file_count}個（ログ収集が進行中です）"
+        increment_success
     else
         echo "⚠️  pos_fileが見つかりません（まだログが収集されていない可能性があります）"
+        increment_warning
     fi
 fi
 echo ""
@@ -218,7 +273,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 # Fluentdのstdout出力を確認
 echo "Fluentdのstdout出力（最新10行）:"
-docker-compose logs --tail=10 fluentd | grep -E "json|nginx|openappsec" || echo "  関連ログが見つかりません"
+$DOCKER_COMPOSE_CMD logs --tail=10 fluentd 2>/dev/null | grep -E "json|nginx|openappsec" || echo "  関連ログが見つかりません"
 echo ""
 
 # 8. OpenAppSecログの確認
@@ -277,15 +332,32 @@ echo "📋 10. 環境変数の確認"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 echo "Fluentdコンテナの環境変数:"
-docker-compose exec -T fluentd env | grep -E "FLUENTD_|LOG_COLLECTION|HOSTNAME|CUSTOMER_NAME" || echo "  環境変数が見つかりません"
+$DOCKER_COMPOSE_CMD exec -T fluentd env 2>/dev/null | grep -E "FLUENTD_|LOG_COLLECTION|HOSTNAME|CUSTOMER_NAME" || echo "  環境変数が見つかりません"
 echo ""
 
+# テスト結果サマリー
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  ✅ ログ転送機能動作確認完了"
+echo "  テスト結果サマリー"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "✅ 成功: ${SUCCESS_COUNT}"
+echo "⚠️  警告: ${WARNING_COUNT}"
+echo "❌ エラー: ${ERROR_COUNT}"
 echo ""
-echo "次のステップ:"
-echo "  1. Fluentdのログを確認して、ログが正しく収集されているか確認"
-echo "  2. ログ転送先（HTTP/HTTPS）が設定されている場合、転送が正常に動作しているか確認"
-echo "  3. ログローテーションが正常に動作するか確認（時間経過後）"
-echo "  4. 大量のログが発生した場合のパフォーマンスを確認"
+
+# 終了コードの決定
+if [ "$ERROR_COUNT" -gt 0 ]; then
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  ❌ ログ転送機能動作確認: 失敗（エラーが ${ERROR_COUNT} 件発生）"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    exit 1
+elif [ "$WARNING_COUNT" -gt 0 ]; then
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  ⚠️  ログ転送機能動作確認: 警告あり（警告が ${WARNING_COUNT} 件発生）"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    exit 0
+else
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  ✅ ログ転送機能動作確認: 成功"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    exit 0
+fi
