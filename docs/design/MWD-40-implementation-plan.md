@@ -4,6 +4,41 @@
 
 WAFエンジンのログをログ管理サーバに転送する機能を実装します。Fluentdを使用して、NginxアクセスログとOpenAppSec WAF検知ログをJSON形式で転送します。
 
+## ログ連携方式の選択
+
+本実装では、以下のログ連携方式を選択可能にします：
+
+- **共有ボリューム方式（デフォルト）**: ログファイルを共有ボリュームに出力し、Fluentdが`tail`プラグインで収集
+- **ログドライバ方式（オプション）**: Docker Logging Driverを使用して標準出力からログを収集
+- **ハイブリッド方式（特殊用途）**: 両方式を併用
+
+詳細な比較検討は `docs/design/MWD-40-log-integration-analysis.md` を参照してください。
+
+**推奨**: 共有ボリューム方式（デフォルト）
+- FQDN別ログの個別処理が容易
+- logrotateとの連携が容易
+- ログファイルへの直接アクセスが可能
+
+## ログのFQDN別分割
+
+### Nginxログ
+
+Nginxログは、FQDN別のディレクトリに出力します：
+- アクセスログ: `/var/log/nginx/{fqdn}/access.log`
+- エラーログ: `/var/log/nginx/{fqdn}/error.log`
+
+### OpenAppSecログ
+
+OpenAppSecログは、OpenAppSecの設定では直接FQDN別に分けることはできませんが、Fluentd側でFQDN別に分離します：
+
+1. **元のログ**: `/var/log/nano_agent/*.log`（すべてのFQDNのログが混在）
+2. **FQDN別分離**: Fluentdの`rewrite_tag_filter`プラグインで、ログJSONからFQDN情報を抽出し、FQDN別にタグを付け直す
+3. **FQDN別出力（オプション）**: Fluentdの`file`プラグインで、FQDN別のディレクトリに出力（`/var/log/nano_agent/{fqdn}/*.log`）
+
+**FQDN情報の抽出方法**:
+- OpenAppSecのログJSONから`host`, `hostname`, `requestHost`等のフィールドを抽出
+- 抽出したFQDN情報を基にタグを付け直す（`openappsec.detection.{fqdn}`）
+
 ## 参照設計書
 
 - **要件定義**: `MrWebDefence-Design/docs/REQUIREMENT.md`
@@ -11,6 +46,7 @@ WAFエンジンのログをログ管理サーバに転送する機能を実装�
 - **詳細設計**: `MrWebDefence-Design/docs/DESIGN.md`
 - **OpenAppSec統合設計**: `docs/design/MWD-38-openappsec-integration.md`
 - **タスクレビュー**: `docs/design/MWD-38-task-review.md`
+- **ログ連携方法比較検討**: `docs/design/MWD-40-log-integration-analysis.md`
 
 ## 目的
 
@@ -18,6 +54,8 @@ WAFエンジンのログをログ管理サーバに転送する機能を実装�
 - NginxアクセスログのJSON形式出力と転送
 - OpenAppSec WAF検知ログの転送
 - ログ管理サーバへの統合
+- ログ連携方法の選択（共有ボリューム方式 / ログドライバ方式）
+- ログローテーション設定（毎日ローテート、logrotate.d使用）
 
 ## アーキテクチャ概要
 
@@ -29,7 +67,7 @@ WAFエンジンのログをログ管理サーバに転送する機能を実装�
 │  ┌──────────────────────────────────────────────────┐  │
 │  │  Access Log (JSON形式)                            │  │
 │  │  - /var/log/nginx/access.log                      │  │
-│  │  - /var/log/nginx/{fqdn}.access.log               │  │
+│  │  - /var/log/nginx/{fqdn}/access.log               │  │
 │  │  Error Log                                         │  │
 │  │  - /var/log/nginx/error.log                       │  │
 │  └──────────────────────────────────────────────────┘  │
@@ -42,6 +80,8 @@ WAFエンジンのログをログ管理サーバに転送する機能を実装�
 │  ┌──────────────────────────────────────────────────┐  │
 │  │  WAF Detection Log                                 │  │
 │  │  - /var/log/nano_agent/*.log                      │  │
+│  │  (FQDN別にFluentdで分離)                           │  │
+│  │  - /var/log/nano_agent/{fqdn}/*.log (オプション)  │  │
 │  └──────────────────────────────────────────────────┘  │
 └──────────────────────┬──────────────────────────────────┘
                        │
@@ -51,7 +91,11 @@ WAFエンジンのログをログ管理サーバに転送する機能を実装�
 │              Fluentd Container                           │
 │  ┌──────────────────────────────────────────────────┐  │
 │  │  - Nginxアクセスログの収集                        │  │
+│  │    (tail プラグイン or forward プラグイン)        │  │
 │  │  - OpenAppSec WAF検知ログの収集                   │  │
+│  │    (tail プラグイン or forward プラグイン)        │  │
+│  │  - FQDN別のタグ付け・分離                         │  │
+│  │  - メタデータの追加（ホスト名、顧客名、日時等）    │  │
 │  │  - JSON形式への変換                               │  │
 │  │  - ログ管理サーバへの転送                          │  │
 │  └──────────────────────────────────────────────────┘  │
@@ -76,11 +120,18 @@ WAFエンジンのログをログ管理サーバに転送する機能を実装�
 
 2. **Nginx**
    - JSON形式のアクセスログ出力
-   - FQDN別のログファイル出力
+   - FQDN別のログディレクトリ出力（`/var/log/nginx/{fqdn}/`）
+   - ログローテーション設定（毎日ローテート、logrotate.d使用）
 
 3. **OpenAppSec Agent**
    - WAF検知ログの出力
    - JSON形式でのログ出力（設定可能）
+   - FQDN別のログ分離（Fluentd側で実装）
+
+4. **ログ連携方式**
+   - **デフォルト**: 共有ボリューム方式
+   - **オプション**: ログドライバ方式（環境変数で選択可能）
+   - **特殊用途**: ハイブリッド方式（両方式の併用）
 
 ## 実装フェーズ
 
@@ -153,12 +204,19 @@ log_format json_combined escape=json
 
 **実装内容**:
 - 各FQDN設定ファイルでJSON形式のログフォーマットを使用
-- FQDN別のログファイルにJSON形式で出力
+- FQDN別のログディレクトリにJSON形式で出力
+- ログパス: `/var/log/nginx/{fqdn}/access.log`, `/var/log/nginx/{fqdn}/error.log`
 
 **設定例**:
 ```nginx
-access_log /var/log/nginx/example1.com.access.log json_combined;
+# FQDN別ディレクトリにログを出力
+access_log /var/log/nginx/example1.com/access.log json_combined;
+error_log /var/log/nginx/example1.com/error.log warn;
 ```
+
+**理由**:
+- logrotateやFluentd設定での識別がしやすい
+- 1ディレクトリのファイル数が多くなりすぎることを防ぐ
 
 ### Phase 3: OpenAppSec WAF検知ログの転送設定
 
@@ -176,6 +234,23 @@ access_log /var/log/nginx/example1.com.access.log json_combined;
 - `logDestination.logToAgent: true`
 - ログファイルパス: `/var/log/nano_agent/*.log`
 
+**注意**: OpenAppSecのログファイル自体をFQDN別に分けることは、OpenAppSecの設定では直接できません。OpenAppSecは1つのログファイルにすべてのFQDNのログを出力するため、Fluentd側でFQDN別に分離する必要があります。
+
+#### Phase 3.1.1: OpenAppSecログのFQDN別分割
+
+**実装方法**: Fluentd側でFQDN別に分離
+
+OpenAppSecのログJSONには、リクエストのホスト情報（FQDN）が含まれています。Fluentdの`rewrite_tag_filter`プラグインまたは`record_transformer`プラグインを使用して、FQDN別にタグを付け、FQDN別のディレクトリに出力します。
+
+**実装方針**:
+1. OpenAppSecのログJSONからFQDN情報を抽出（`host`, `hostname`, `requestHost`等のフィールドから）
+2. Fluentdの`rewrite_tag_filter`プラグインでFQDN別にタグを付け直す
+3. FQDN別のディレクトリにログを出力（`file`プラグインを使用）
+
+**ログファイルパス**:
+- 元のログ: `/var/log/nano_agent/*.log`
+- FQDN別ログ: `/var/log/nano_agent/{fqdn}/*.log`（Fluentdで生成）
+
 #### Phase 3.2: FluentdでのOpenAppSecログ収集設定
 
 **ファイル**: `docker/fluentd/fluent.conf`
@@ -183,7 +258,64 @@ access_log /var/log/nginx/example1.com.access.log json_combined;
 **実装内容**:
 - OpenAppSecログファイルの監視設定
 - JSON形式のログパース設定
-- タグ付け設定（`openappsec.detection`）
+- FQDN別のタグ付け設定（`openappsec.detection.{fqdn}`）
+- FQDN別のログファイル出力（オプション）
+
+**実装例**:
+```aconf
+<source>
+  @type tail
+  @id openappsec_detection
+  path /var/log/nano_agent/*.log
+  pos_file /var/log/fluentd/openappsec.detection.pos
+  tag openappsec.detection
+  <parse>
+    @type json
+    time_key time
+    time_format %Y-%m-%dT%H:%M:%S%z
+  </parse>
+  @if "#{ENV['LOG_COLLECTION_METHOD']}" == "shared-volume" || "#{ENV['LOG_COLLECTION_METHOD']}" == "hybrid"
+</source>
+
+# FQDN別にタグを付け直す
+<filter openappsec.detection>
+  @type rewrite_tag_filter
+  <rule>
+    key host
+    pattern /^(.+)$/
+    tag openappsec.detection.${1}
+  </rule>
+  # hostフィールドがない場合のフォールバック
+  <rule>
+    key hostname
+    pattern /^(.+)$/
+    tag openappsec.detection.${1}
+  </rule>
+  # デフォルトタグ（FQDNが取得できない場合）
+  <rule>
+    key _
+    pattern /.*/
+    tag openappsec.detection.unknown
+  </rule>
+</filter>
+
+# FQDN別のログファイル出力（オプション）
+<match openappsec.detection.**>
+  @type file
+  path /var/log/nano_agent/${tag_parts[2]}/detection
+  append true
+  <format>
+    @type json
+  </format>
+  <buffer tag,time>
+    @type file
+    path /var/log/fluentd/buffer/openappsec
+    timekey 1d
+    timekey_wait 10m
+    timekey_use_utc true
+  </buffer>
+</match>
+```
 
 ### Phase 4: ログ転送先の設定
 
@@ -211,17 +343,38 @@ access_log /var/log/nginx/example1.com.access.log json_combined;
 - エラーハンドリング設定
 - リトライ設定
 
-### Phase 5: ログローテーション設定（オプション）
+### Phase 5: ログローテーション設定
 
 #### Phase 5.1: logrotate設定ファイルの作成
 
-**ファイル**: `docker/fluentd/logrotate.conf`
+**ファイル**: `docker/nginx/logrotate.d/nginx`
 
 **実装内容**:
-- Nginxアクセスログのローテーション設定
-- Nginxエラーログのローテーション設定
-- OpenAppSecログのローテーション設定
-- FQDN別ログのローテーション設定
+- Nginxアクセスログのローテーション設定（毎日ローテート）
+- Nginxエラーログのローテーション設定（毎日ローテート）
+- FQDN別ログのローテーション設定（ディレクトリ単位）
+
+**設定例**:
+```bash
+# /etc/logrotate.d/nginx
+/var/log/nginx/*/access.log /var/log/nginx/*/error.log {
+    daily
+    rotate 30
+    compress
+    delaycompress
+    notifempty
+    missingok
+    sharedscripts
+    postrotate
+        [ -f /var/run/nginx.pid ] && kill -USR1 `cat /var/run/nginx.pid`
+    endscript
+}
+```
+
+**特徴**:
+- **ローテーション方式**: 毎日ローテート（サイズベースではない）
+- **保持期間**: 30日間（設定可能）
+- **圧縮**: 有効（delaycompressで1日遅延）
 
 ## 実装詳細
 
@@ -231,20 +384,64 @@ access_log /var/log/nginx/example1.com.access.log json_combined;
 
 ```yaml
 services:
+  nginx:
+    volumes:
+      # 設定ファイル
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      # ログファイル（共有ボリューム方式の場合）
+      - ./nginx/logs:/var/log/nginx:rw
+      # logrotate設定
+      - ./nginx/logrotate.d:/etc/logrotate.d:ro
+      # 共有メモリ
+      - nginx-shm:/dev/shm/check-point
+    logging:
+      # ログドライバ方式を選択する場合: driver: "fluentd"
+      driver: "${NGINX_LOG_DRIVER:-json-file}"
+      options:
+        ${NGINX_LOG_DRIVER_OPTIONS:-}
+
+  openappsec-agent:
+    volumes:
+      # 設定ファイル
+      - ./openappsec/local_policy.yaml:/ext/appsec/local_policy.yaml:ro
+      # ログファイル（共有ボリューム方式の場合）
+      - ./openappsec/logs:/var/log/nano_agent:rw
+      # 共有メモリ
+      - nginx-shm:/dev/shm/check-point
+    logging:
+      # ログドライバ方式を選択する場合: driver: "fluentd"
+      driver: "${OPENAPPSEC_LOG_DRIVER:-json-file}"
+      options:
+        ${OPENAPPSEC_LOG_DRIVER_OPTIONS:-}
+
   fluentd:
     image: fluent/fluentd:v1.16-debian-1
     container_name: mwd-fluentd
     volumes:
       # Fluentd設定ファイル
       - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf:ro
-      # Nginxログ
+      # Nginxログ（共有ボリューム方式の場合、読み取り専用）
       - ./nginx/logs:/var/log/nginx:ro
-      # OpenAppSecログ
+      # OpenAppSecログ（共有ボリューム方式の場合、読み取り専用）
       - ./openappsec/logs:/var/log/nano_agent:ro
+      # Fluentdのpos_fileとバッファ（永続ボリューム、共有ボリューム方式の場合必須）
+      - ./fluentd/log:/var/log/fluentd:rw
+      # OpenAppSec FQDN別ログ出力用（オプション、Fluentdで生成）
+      - ./openappsec/logs-fqdn:/var/log/nano_agent:rw
+    ports:
+      # ログドライバ方式の場合、Fluentd Forward Protocol用
+      - "24224:24224"
+      - "24224:24224/udp"
     environment:
       - FLUENTD_OUTPUT_URL=${FLUENTD_OUTPUT_URL:-stdout}
       - FLUENTD_OUTPUT_METHOD=${FLUENTD_OUTPUT_METHOD:-stdout}
       - FLUENTD_OUTPUT_AUTH=${FLUENTD_OUTPUT_AUTH:-}
+      # ログ収集方式の選択
+      - LOG_COLLECTION_METHOD=${LOG_COLLECTION_METHOD:-shared-volume}
+      # shared-volume: 共有ボリューム方式（デフォルト）
+      # log-driver: ログドライバ方式
+      # hybrid: ハイブリッド方式
     networks:
       - mwd-network
     depends_on:
@@ -262,30 +459,84 @@ services:
 
 #### docker/fluentd/fluent.conf
 
-```xml
+```aconf
+# 共有ボリューム方式の場合（デフォルト）
 <source>
   @type tail
   @id nginx_access
-  path /var/log/nginx/*.access.log
+  path /var/log/nginx/*/access.log
   pos_file /var/log/fluentd/nginx.access.pos
-  tag nginx.access
+  tag nginx.access.${File.dirname(path).split('/').last}
+  # 一時的なタグ（FQDNのみ）: nginx.access.example1.com
   <parse>
     @type json
     time_key time
     time_format %Y-%m-%dT%H:%M:%S%z
   </parse>
+  @if "#{ENV['LOG_COLLECTION_METHOD']}" == "shared-volume" || "#{ENV['LOG_COLLECTION_METHOD']}" == "hybrid"
+</source>
+
+# Nginxアクセスログのタグを完全な形式に変換（ホスト名、顧客名、FQDN名、年、月、日、時間を含む）
+<filter nginx.access.**>
+  @type record_transformer
+  <record>
+    # メタデータをレコードに追加
+    log_type "nginx"
+    hostname "#{ENV['HOSTNAME'] || Socket.gethostname}"
+    customer_name ${record["customer_name"] || ENV["CUSTOMER_NAME"] || "default"}
+    fqdn ${tag_parts[2]}
+    year ${Time.at(time).strftime("%Y")}
+    month ${Time.at(time).strftime("%m")}
+    day ${Time.at(time).strftime("%d")}
+    hour ${Time.at(time).strftime("%H")}
+    minute ${Time.at(time).strftime("%M")}
+    second ${Time.at(time).strftime("%S")}
+  </record>
+  # タグを動的に生成: nginx.access.{hostname}.{customer_name}.{fqdn}.{year}.{month}.{day}.{hour}
+  tag "nginx.access.${record['hostname']}.${record['customer_name']}.${record['fqdn']}.${record['year']}.${record['month']}.${record['day']}.${record['hour']}"
+</filter>
+
+# ログドライバ方式の場合
+<source>
+  @type forward
+  @id docker_logs
+  port 24224
+  bind 0.0.0.0
+  @if "#{ENV['LOG_COLLECTION_METHOD']}" == "log-driver" || "#{ENV['LOG_COLLECTION_METHOD']}" == "hybrid"
 </source>
 
 <source>
   @type tail
   @id nginx_error
-  path /var/log/nginx/error.log
+  path /var/log/nginx/*/error.log
   pos_file /var/log/fluentd/nginx.error.pos
-  tag nginx.error
+  tag nginx.error.${File.dirname(path).split('/').last}
+  # 一時的なタグ（FQDNのみ）: nginx.error.example1.com
   <parse>
-    @type nginx
+    @type none
   </parse>
+  @if "#{ENV['LOG_COLLECTION_METHOD']}" == "shared-volume" || "#{ENV['LOG_COLLECTION_METHOD']}" == "hybrid"
 </source>
+
+# Nginxエラーログのタグを完全な形式に変換（ホスト名、顧客名、FQDN名、年、月、日、時間を含む）
+<filter nginx.error.**>
+  @type record_transformer
+  <record>
+    # メタデータをレコードに追加
+    log_type "nginx"
+    hostname "#{ENV['HOSTNAME'] || Socket.gethostname}"
+    customer_name ${record["customer_name"] || ENV["CUSTOMER_NAME"] || "default"}
+    fqdn ${tag_parts[2]}
+    year ${Time.at(time).strftime("%Y")}
+    month ${Time.at(time).strftime("%m")}
+    day ${Time.at(time).strftime("%d")}
+    hour ${Time.at(time).strftime("%H")}
+    minute ${Time.at(time).strftime("%M")}
+    second ${Time.at(time).strftime("%S")}
+  </record>
+  # タグを動的に生成: nginx.error.{hostname}.{customer_name}.{fqdn}.{year}.{month}.{day}.{hour}
+  tag "nginx.error.${record['hostname']}.${record['customer_name']}.${record['fqdn']}.${record['year']}.${record['month']}.${record['day']}.${record['hour']}"
+</filter>
 
 <source>
   @type tail
@@ -298,40 +549,68 @@ services:
     time_key time
     time_format %Y-%m-%dT%H:%M:%S%z
   </parse>
+  @if "#{ENV['LOG_COLLECTION_METHOD']}" == "shared-volume" || "#{ENV['LOG_COLLECTION_METHOD']}" == "hybrid"
 </source>
 
-<filter nginx.**>
-  @type record_transformer
-  <record>
-    log_type "nginx"
-    source "waf-engine"
-  </record>
+# OpenAppSecログをFQDN別にタグ付け（中間ステップ）
+<filter openappsec.detection>
+  @type rewrite_tag_filter
+  <rule>
+    key host
+    pattern /^(.+)$/
+    tag openappsec.detection.${1}
+  </rule>
+  # hostフィールドがない場合のフォールバック
+  <rule>
+    key hostname
+    pattern /^(.+)$/
+    tag openappsec.detection.${1}
+  </rule>
+  # requestHostフィールドのフォールバック
+  <rule>
+    key requestHost
+    pattern /^(.+)$/
+    tag openappsec.detection.${1}
+  </rule>
+  # デフォルトタグ（FQDNが取得できない場合）
+  <rule>
+    key _
+    pattern /.*/
+    tag openappsec.detection.unknown
+  </rule>
 </filter>
 
-<filter openappsec.**>
+# OpenAppSecログのタグを完全な形式に変換（ホスト名、顧客名、FQDN名、年、月、日、時間、検知したシグニチャを含む）
+<filter openappsec.detection.**>
   @type record_transformer
   <record>
+    # メタデータをレコードに追加
     log_type "openappsec"
     source "waf-engine"
+    # タグからFQDNを抽出（タグ形式: openappsec.detection.{fqdn}）
+    fqdn ${tag_parts[2]}
+    # ホスト名（環境変数またはコンテナ名から取得）
+    hostname "#{ENV['HOSTNAME'] || Socket.gethostname}"
+    # 顧客名（ログレコードから取得、または環境変数から）
+    customer_name ${record["customer_name"] || ENV["CUSTOMER_NAME"] || "default"}
+    # 日時情報を抽出（timeフィールドから）
+    year ${Time.at(time).strftime("%Y")}
+    month ${Time.at(time).strftime("%m")}
+    day ${Time.at(time).strftime("%d")}
+    hour ${Time.at(time).strftime("%H")}
+    minute ${Time.at(time).strftime("%M")}
+    second ${Time.at(time).strftime("%S")}
+    # 検知したシグニチャ（OpenAppSecログから抽出）
+    detected_signature_raw ${record["signature"] || record["protectionName"] || record["ruleName"] || "unknown"}
+    # 検知したシグニチャを正規化（特殊文字をアンダースコアに置換、小文字化）
+    detected_signature ${record["detected_signature_raw"].downcase.gsub(/[^a-z0-9_-]/, "_")}
   </record>
+  # タグを動的に生成: openappsec.detection.{hostname}.{customer_name}.{fqdn}.{year}.{month}.{day}.{hour}.{detected_signature}
+  tag "openappsec.detection.${record['hostname']}.${record['customer_name']}.${record['fqdn']}.${record['year']}.${record['month']}.${record['day']}.${record['hour']}.${record['detected_signature']}"
 </filter>
 
-<match nginx.**>
-  @type http
-  endpoint "#{ENV['FLUENTD_OUTPUT_URL']}"
-  http_method post
-  <buffer>
-    @type file
-    path /var/log/fluentd/buffer
-    flush_interval 5s
-    retry_type exponential_backoff
-    retry_wait 1s
-    retry_max_interval 60s
-    retry_timeout 60m
-  </buffer>
-</match>
-
-<match openappsec.**>
+# NginxログとOpenAppSecログの統合出力設定
+<match {nginx,openappsec}.**>
   @type http
   endpoint "#{ENV['FLUENTD_OUTPUT_URL']}"
   http_method post
@@ -380,7 +659,11 @@ log_format main '$remote_addr - $remote_user [$time_local] "$request" '
                 '"$http_user_agent" "$http_x_forwarded_for"';
 
 # デフォルトのアクセスログ（JSON形式）
-access_log /var/log/nginx/access.log json_combined;
+    # デフォルトのアクセスログ（JSON形式）
+    access_log /var/log/nginx/access.log json_combined;
+    
+    # FQDN別ログは conf.d/{fqdn}.conf で設定
+    # access_log /var/log/nginx/{fqdn}/access.log json_combined;
 ```
 
 ### 4. Nginx設定生成スクリプトの更新
@@ -389,24 +672,259 @@ access_log /var/log/nginx/access.log json_combined;
 
 **変更内容**:
 - JSON形式のログフォーマットを使用するように更新
-- FQDN別ログファイルにJSON形式で出力するように更新
+- FQDN別ログディレクトリにJSON形式で出力するように更新
+- ログディレクトリの自動作成
 
 **変更例**:
 ```bash
+# FQDN別ログディレクトリを作成
+mkdir -p /var/log/nginx/${fqdn}
+
 # JSON形式のログフォーマットを使用
-access_log /var/log/nginx/${fqdn}.access.log json_combined;
+access_log /var/log/nginx/${fqdn}/access.log json_combined;
+error_log /var/log/nginx/${fqdn}/error.log warn;
 ```
+
+## Fluentdタグ設計
+
+### タグ構造
+
+Fluentdのタグは、以下の構造で設計します：
+
+#### Nginxログ
+
+```
+{log_type}.{log_category}.{hostname}.{customer_name}.{fqdn}.{year}.{month}.{day}.{hour}
+```
+
+**例**:
+- `nginx.access.waf-engine-01.customer-a.example1.com.2024.01.15.14`
+- `nginx.error.waf-engine-01.customer-a.example1.com.2024.01.15.14`
+
+**タグの各要素**:
+- `{log_type}`: `nginx`
+- `{log_category}`: `access` または `error`
+- `{hostname}`: ホスト名（環境変数`HOSTNAME`またはコンテナ名）
+- `{customer_name}`: 顧客名（環境変数`CUSTOMER_NAME`またはログレコードから取得）
+- `{fqdn}`: FQDN名（ファイルパスまたはログレコードから抽出）
+- `{year}`: 年（4桁、例: `2024`）
+- `{month}`: 月（2桁、例: `01`）
+- `{day}`: 日（2桁、例: `15`）
+- `{hour}`: 時間（2桁、例: `14`）
+
+#### OpenAppSecログ
+
+```
+{log_type}.{log_category}.{hostname}.{customer_name}.{fqdn}.{year}.{month}.{day}.{hour}.{detected_signature}
+```
+
+**例**:
+- `openappsec.detection.waf-engine-01.customer-a.example1.com.2024.01.15.14.sql-injection-attempt`
+- `openappsec.detection.waf-engine-01.customer-a.example1.com.2024.01.15.14.xss-protection`
+
+**タグの各要素**:
+- `{log_type}`: `openappsec`
+- `{log_category}`: `detection`
+- `{hostname}`: ホスト名（環境変数`HOSTNAME`またはコンテナ名）
+- `{customer_name}`: 顧客名（環境変数`CUSTOMER_NAME`またはログレコードから取得）
+- `{fqdn}`: FQDN名（ログJSONから抽出: `host`, `hostname`, `requestHost`）
+- `{year}`: 年（4桁、例: `2024`）
+- `{month}`: 月（2桁、例: `01`）
+- `{day}`: 日（2桁、例: `15`）
+- `{hour}`: 時間（2桁、例: `14`）
+- `{detected_signature}`: 検知したシグニチャ（ログJSONから抽出: `signature`, `protectionName`, `ruleName`。特殊文字はアンダースコアに正規化）
+
+**注意**: 検知したシグニチャは可変長の文字列で、特殊文字が含まれる可能性があるため、タグに含める前に正規化（特殊文字をアンダースコアに置換、小文字化等）を行います。
+
+### タグに含まれる要素
+
+#### Nginxアクセスログ
+
+| 要素 | 取得方法 | タグ内の位置 | レコード内のフィールド |
+|------|---------|------------|---------------------|
+| ログ種別 | 固定値 | `nginx` | `log_type: "nginx"` |
+| ログカテゴリ | 固定値 | `access` または `error` | - |
+| ホスト名 | 環境変数またはコンテナ名 | `{hostname}` | `hostname` |
+| 顧客名 | 環境変数またはログレコード | `{customer_name}` | `customer_name` |
+| FQDN名 | ファイルパスから抽出 | `{fqdn}` | `fqdn`, `host` |
+| 年 | タイムスタンプから抽出 | `{year}` | `year` |
+| 月 | タイムスタンプから抽出 | `{month}` | `month` |
+| 日 | タイムスタンプから抽出 | `{day}` | `day` |
+| 時間 | タイムスタンプから抽出 | `{hour}` | `hour`, `minute`, `second` |
+
+#### OpenAppSecログ
+
+| 要素 | 取得方法 | タグ内の位置 | レコード内のフィールド |
+|------|---------|------------|---------------------|
+| ログ種別 | 固定値 | `openappsec` | `log_type: "openappsec"` |
+| ログカテゴリ | 固定値 | `detection` | - |
+| ホスト名 | 環境変数またはコンテナ名 | `{hostname}` | `hostname` |
+| 顧客名 | 環境変数またはログレコード | `{customer_name}` | `customer_name` |
+| FQDN名 | ログJSONから抽出 | `{fqdn}` | `host`, `hostname`, `requestHost` |
+| 年 | タイムスタンプから抽出 | `{year}` | `year` |
+| 月 | タイムスタンプから抽出 | `{month}` | `month` |
+| 日 | タイムスタンプから抽出 | `{day}` | `day` |
+| 時間 | タイムスタンプから抽出 | `{hour}` | `hour`, `minute`, `second` |
+| 検知したシグニチャ | ログJSONから抽出 | `{detected_signature}` | `detected_signature`, `signature`, `protectionName`, `ruleName` |
+
+### タグ設計の実装
+
+#### 1. タグの生成
+
+**共有ボリューム方式（Nginx）**:
+
+最初のタグはFQDNのみを含むシンプルな構造で生成し、その後`record_transformer`で完全なタグを生成します。
+
+```aconf
+<source>
+  @type tail
+  path /var/log/nginx/*/access.log
+  tag nginx.access.${File.dirname(path).split('/').last}
+  # 一時的なタグ例: nginx.access.example1.com
+  <parse>
+    @type json
+    time_key time
+    time_format %Y-%m-%dT%H:%M:%S%z
+  </parse>
+</source>
+
+# 完全なタグを生成（ホスト名、顧客名、FQDN名、年、月、日、時間を含む）
+<filter nginx.access.**>
+  @type record_transformer
+  <record>
+    # メタデータをレコードに追加
+    log_type "nginx"
+    hostname "#{ENV['HOSTNAME'] || Socket.gethostname}"
+    customer_name ${record["customer_name"] || ENV["CUSTOMER_NAME"] || "default"}
+    fqdn ${tag_parts[2]}
+    year ${Time.at(time).strftime("%Y")}
+    month ${Time.at(time).strftime("%m")}
+    day ${Time.at(time).strftime("%d")}
+    hour ${Time.at(time).strftime("%H")}
+    minute ${Time.at(time).strftime("%M")}
+    second ${Time.at(time).strftime("%S")}
+  </record>
+  # タグを動的に生成
+  tag "nginx.access.${record['hostname']}.${record['customer_name']}.${record['fqdn']}.${record['year']}.${record['month']}.${record['day']}.${record['hour']}"
+</filter>
+```
+
+**タグ生成の例**:
+- 入力タグ: `nginx.access.example1.com`
+- 生成タグ: `nginx.access.waf-engine-01.customer-a.example1.com.2024.01.15.14`
+
+**共有ボリューム方式（OpenAppSec）**:
+
+最初のタグは`openappsec.detection`で生成し、その後`rewrite_tag_filter`でFQDN別にタグを付け直し、最後に`record_transformer`で完全なタグを生成します。
+
+```aconf
+<source>
+  @type tail
+  path /var/log/nano_agent/*.log
+  tag openappsec.detection
+  # 一時的なタグ: openappsec.detection
+  <parse>
+    @type json
+    time_key time
+    time_format %Y-%m-%dT%H:%M:%S%z
+  </parse>
+</source>
+
+# FQDN別にタグを付け直す（中間ステップ）
+<filter openappsec.detection>
+  @type rewrite_tag_filter
+  <rule>
+    key host
+    pattern /^(.+)$/
+    tag openappsec.detection.${1}
+  </rule>
+  # hostフィールドがない場合のフォールバック
+  <rule>
+    key hostname
+    pattern /^(.+)$/
+    tag openappsec.detection.${1}
+  </rule>
+  # requestHostフィールドのフォールバック
+  <rule>
+    key requestHost
+    pattern /^(.+)$/
+    tag openappsec.detection.${1}
+  </rule>
+  # デフォルトタグ（FQDNが取得できない場合）
+  <rule>
+    key _
+    pattern /.*/
+    tag openappsec.detection.unknown
+  </rule>
+</filter>
+
+# 完全なタグを生成（ホスト名、顧客名、FQDN名、年、月、日、時間、検知したシグニチャを含む）
+<filter openappsec.detection.**>
+  @type record_transformer
+  <record>
+    # メタデータをレコードに追加
+    log_type "openappsec"
+    source "waf-engine"
+    # タグからFQDNを抽出（タグ形式: openappsec.detection.{fqdn}）
+    fqdn ${tag_parts[2]}
+    # ホスト名（環境変数またはコンテナ名から取得）
+    hostname "#{ENV['HOSTNAME'] || Socket.gethostname}"
+    # 顧客名（ログレコードから取得、または環境変数から）
+    customer_name ${record["customer_name"] || ENV["CUSTOMER_NAME"] || "default"}
+    # 日時情報を抽出（timeフィールドから）
+    year ${Time.at(time).strftime("%Y")}
+    month ${Time.at(time).strftime("%m")}
+    day ${Time.at(time).strftime("%d")}
+    hour ${Time.at(time).strftime("%H")}
+    minute ${Time.at(time).strftime("%M")}
+    second ${Time.at(time).strftime("%S")}
+    # 検知したシグニチャ（OpenAppSecログから抽出）
+    detected_signature_raw ${record["signature"] || record["protectionName"] || record["ruleName"] || "unknown"}
+    # 検知したシグニチャを正規化（特殊文字をアンダースコアに置換、小文字化）
+    detected_signature ${record["detected_signature_raw"].downcase.gsub(/[^a-z0-9_-]/, "_")}
+  </record>
+  # タグを動的に生成: openappsec.detection.{hostname}.{customer_name}.{fqdn}.{year}.{month}.{day}.{hour}.{detected_signature}
+  tag "openappsec.detection.${record['hostname']}.${record['customer_name']}.${record['fqdn']}.${record['year']}.${record['month']}.${record['day']}.${record['hour']}.${record['detected_signature']}"
+</filter>
+```
+
+**タグ生成の例**:
+- 入力タグ: `openappsec.detection.example1.com`
+- 検知したシグニチャ: `SQL Injection Attempt` → 正規化後: `sql_injection_attempt`
+- 生成タグ: `openappsec.detection.waf-engine-01.customer-a.example1.com.2024.01.15.14.sql_injection_attempt`
+
+#### 2. メタデータの追加
+
+`record_transformer`プラグインを使用して、タグに含まれる要素をレコードに追加します（上記のFluentd設定例を参照）。
+
+#### 3. 顧客名の取得方法
+
+顧客名は、以下の優先順位で取得します：
+
+1. **ログレコード内のフィールド**: `customer_name`フィールドが存在する場合
+2. **環境変数**: `CUSTOMER_NAME`環境変数が設定されている場合
+3. **デフォルト値**: `"default"`
+
+**実装方針**:
+- ConfigAgentが管理APIから取得した設定情報に顧客名が含まれている場合、Nginxのログフォーマットに追加
+- OpenAppSecのログには、ConfigAgentが設定ファイルに顧客名を追加（将来的な拡張）
 
 ## 受け入れ条件
 
 - [ ] Fluentdコンテナが正常に起動する
 - [ ] NginxアクセスログがJSON形式で出力される
-- [ ] FluentdがNginxアクセスログを正常に収集できる
+- [ ] FQDN別ログが `/var/log/nginx/{fqdn}/[access.log|error.log]` に出力される
+- [ ] FluentdがNginxアクセスログを正常に収集できる（共有ボリューム方式）
+- [ ] FluentdがDocker Logging Driverからログを正常に受信できる（ログドライバ方式）
 - [ ] OpenAppSec WAF検知ログが正常に収集できる
+- [ ] OpenAppSecログがFQDN別に正常に分離される
 - [ ] ログがログ管理サーバに正常に転送される（設定した場合）
-- [ ] ログのタグ付けが正しく行われる
+- [ ] ログのタグ付けが正しく行われる（FQDN別タグを含む）
+- [ ] メタデータ（ホスト名、顧客名、日時、検知シグニチャ等）が正しく追加される
 - [ ] エラーハンドリングとリトライが正常に動作する
-- [ ] ログローテーションが正常に動作する（実装した場合）
+- [ ] ログローテーションが毎日正常に動作する（logrotate.d使用）
+- [ ] Fluentd永続ボリュームが正常にマウントされる（共有ボリューム方式の場合）
+- [ ] 環境変数によるログ収集方式の選択が正常に動作する
 
 ## 依存関係
 
