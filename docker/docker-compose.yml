@@ -188,13 +188,13 @@ services:
       - ./fluentd/archive.d:/fluentd/etc/archive.d:ro
       # Nginxログ（共有ボリューム方式の場合、読み取り専用）
       - ./nginx/logs:/var/log/nginx:ro
-      # OpenAppSecログ（共有ボリューム方式の場合、読み取り専用）
-      - ./openappsec/logs:/var/log/nano_agent:ro
+      # OpenAppSecログ（共有ボリューム方式の場合）
+      # 元のログファイル（/var/log/nano_agent/*.log）は読み取り専用で監視
+      # FQDN別ログ（/var/log/nano_agent/{fqdn}/*.log）は書き込み可能で出力
+      # 注意: 元のログファイルとは異なるディレクトリに出力することで、ログの無限ループを防止
+      - ./openappsec/logs:/var/log/nano_agent:rw
       # Fluentdのpos_fileとバッファ（永続ボリューム、共有ボリューム方式の場合必須）
       - ./fluentd/log:/var/log/fluentd:rw
-      # OpenAppSec FQDN別ログ出力用（オプション、Fluentdで生成）
-      # 注意: 監視対象のパスとは別のディレクトリに出力することで、ログの無限ループを防止
-      - ./openappsec/logs-fqdn:/var/log/fluentd/output/openappsec_fqdn:rw
     ports:
       # ログドライバ方式の場合、Fluentd Forward Protocol用
       - "24224:24224"
