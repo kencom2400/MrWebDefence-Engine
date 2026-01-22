@@ -599,7 +599,7 @@ services:
   </rule>
 </filter>
 
-# OpenAppSecログのタグを完全な形式に変換（ホスト名、顧客名、FQDN名、年、月、日、時間、検知したシグニチャを含む）
+# OpenAppSecログのタグを完全な形式に変換（ホスト名、顧客名、FQDN名、signature、protectionName、ruleName、年、月、日、時間を含む）
 <filter openappsec.detection.**>
   @type record_transformer
   <record>
@@ -612,6 +612,13 @@ services:
     hostname "#{ENV['HOSTNAME'] || Socket.gethostname}"
     # 顧客名（ログレコードから取得、または環境変数から）
     customer_name ${record["customer_name"] || ENV["CUSTOMER_NAME"] || "default"}
+    # シグニチャ情報（OpenAppSecログから抽出）
+    signature_raw ${record["signature"] || "unknown"}
+    signature ${record["signature_raw"].downcase.gsub(/[^a-z0-9_-]/, "_")}
+    protection_name_raw ${record["protectionName"] || "unknown"}
+    protection_name ${record["protection_name_raw"].downcase.gsub(/[^a-z0-9_-]/, "_")}
+    rule_name_raw ${record["ruleName"] || "unknown"}
+    rule_name ${record["rule_name_raw"].downcase.gsub(/[^a-z0-9_-]/, "_")}
     # 日時情報を抽出（timeフィールドから）
     year ${Time.at(time).strftime("%Y")}
     month ${Time.at(time).strftime("%m")}
@@ -619,13 +626,9 @@ services:
     hour ${Time.at(time).strftime("%H")}
     minute ${Time.at(time).strftime("%M")}
     second ${Time.at(time).strftime("%S")}
-    # 検知したシグニチャ（OpenAppSecログから抽出）
-    detected_signature_raw ${record["signature"] || record["protectionName"] || record["ruleName"] || "unknown"}
-    # 検知したシグニチャを正規化（特殊文字をアンダースコアに置換、小文字化）
-    detected_signature ${record["detected_signature_raw"].downcase.gsub(/[^a-z0-9_-]/, "_")}
   </record>
-  # タグを動的に生成: openappsec.detection.{hostname}.{customer_name}.{fqdn}.{year}.{month}.{day}.{hour}.{detected_signature}
-  tag "openappsec.detection.${record['hostname']}.${record['customer_name']}.${record['fqdn']}.${record['year']}.${record['month']}.${record['day']}.${record['hour']}.${record['detected_signature']}"
+  # タグを動的に生成: openappsec.detection.{hostname}.{customer_name}.{fqdn}.{signature}.{protectionName}.{ruleName}.{year}.{month}.{day}.{hour}
+  tag "openappsec.detection.${record['hostname']}.${record['customer_name']}.${record['fqdn']}.${record['signature']}.${record['protection_name']}.${record['rule_name']}.${record['year']}.${record['month']}.${record['day']}.${record['hour']}"
 </filter>
 
 # NginxログとOpenAppSecログの統合出力設定
@@ -744,12 +747,12 @@ Fluentdのタグは、以下の構造で設計します：
 #### OpenAppSecログ
 
 ```
-{log_type}.{log_category}.{hostname}.{customer_name}.{fqdn}.{year}.{month}.{day}.{hour}.{detected_signature}
+{log_type}.{log_category}.{hostname}.{customer_name}.{fqdn}.{signature}.{protectionName}.{ruleName}.{year}.{month}.{day}.{hour}
 ```
 
 **例**:
-- `openappsec.detection.waf-engine-01.customer-a.example1.com.2024.01.15.14.sql-injection-attempt`
-- `openappsec.detection.waf-engine-01.customer-a.example1.com.2024.01.15.14.xss-protection`
+- `openappsec.detection.waf-engine-01.customer-a.example1.com.sql-injection-attempt.threat-prevention-basic.rule-001.2024.01.15.14`
+- `openappsec.detection.waf-engine-01.customer-a.example1.com.xss-attempt.xss-protection.rule-002.2024.01.15.14`
 
 **タグの各要素**:
 - `{log_type}`: `openappsec`
@@ -757,13 +760,15 @@ Fluentdのタグは、以下の構造で設計します：
 - `{hostname}`: ホスト名（環境変数`HOSTNAME`またはコンテナ名）
 - `{customer_name}`: 顧客名（環境変数`CUSTOMER_NAME`またはログレコードから取得）
 - `{fqdn}`: FQDN名（ログJSONから抽出: `host`, `hostname`, `requestHost`）
+- `{signature}`: シグニチャ（ログJSONから抽出: `signature`。存在しない場合は`unknown`。特殊文字はアンダースコアに正規化）
+- `{protectionName}`: 保護名（ログJSONから抽出: `protectionName`。存在しない場合は`unknown`。特殊文字はアンダースコアに正規化）
+- `{ruleName}`: ルール名（ログJSONから抽出: `ruleName`。存在しない場合は`unknown`。特殊文字はアンダースコアに正規化）
 - `{year}`: 年（4桁、例: `2024`）
 - `{month}`: 月（2桁、例: `01`）
 - `{day}`: 日（2桁、例: `15`）
 - `{hour}`: 時間（2桁、例: `14`）
-- `{detected_signature}`: 検知したシグニチャ（ログJSONから抽出: `signature`, `protectionName`, `ruleName`。特殊文字はアンダースコアに正規化）
 
-**注意**: 検知したシグニチャは可変長の文字列で、特殊文字が含まれる可能性があるため、タグに含める前に正規化（特殊文字をアンダースコアに置換、小文字化等）を行います。
+**注意**: `signature`、`protectionName`、`ruleName`は可変長の文字列で、特殊文字が含まれる可能性があるため、タグに含める前に正規化（特殊文字をアンダースコアに置換、小文字化等）を行います。各フィールドが存在しない場合は`unknown`を使用します。
 
 ### タグに含まれる要素
 
@@ -794,7 +799,9 @@ Fluentdのタグは、以下の構造で設計します：
 | 月 | タイムスタンプから抽出 | `{month}` | `month` |
 | 日 | タイムスタンプから抽出 | `{day}` | `day` |
 | 時間 | タイムスタンプから抽出 | `{hour}` | `hour`, `minute`, `second` |
-| 検知したシグニチャ | ログJSONから抽出 | `{detected_signature}` | `detected_signature`, `signature`, `protectionName`, `ruleName` |
+| シグニチャ | ログJSONから抽出 | `{signature}` | `signature` |
+| 保護名 | ログJSONから抽出 | `{protectionName}` | `protectionName` |
+| ルール名 | ログJSONから抽出 | `{ruleName}` | `ruleName` |
 
 ### タグ設計の実装
 
@@ -887,7 +894,7 @@ Fluentdのタグは、以下の構造で設計します：
   </rule>
 </filter>
 
-# 完全なタグを生成（ホスト名、顧客名、FQDN名、年、月、日、時間、検知したシグニチャを含む）
+# 完全なタグを生成（ホスト名、顧客名、FQDN名、signature、protectionName、ruleName、年、月、日、時間を含む）
 <filter openappsec.detection.**>
   @type record_transformer
   <record>
@@ -900,6 +907,13 @@ Fluentdのタグは、以下の構造で設計します：
     hostname "#{ENV['HOSTNAME'] || Socket.gethostname}"
     # 顧客名（ログレコードから取得、または環境変数から）
     customer_name ${record["customer_name"] || ENV["CUSTOMER_NAME"] || "default"}
+    # シグニチャ情報（OpenAppSecログから抽出）
+    signature_raw ${record["signature"] || "unknown"}
+    signature ${record["signature_raw"].downcase.gsub(/[^a-z0-9_-]/, "_")}
+    protection_name_raw ${record["protectionName"] || "unknown"}
+    protection_name ${record["protection_name_raw"].downcase.gsub(/[^a-z0-9_-]/, "_")}
+    rule_name_raw ${record["ruleName"] || "unknown"}
+    rule_name ${record["rule_name_raw"].downcase.gsub(/[^a-z0-9_-]/, "_")}
     # 日時情報を抽出（timeフィールドから）
     year ${Time.at(time).strftime("%Y")}
     month ${Time.at(time).strftime("%m")}
@@ -907,20 +921,19 @@ Fluentdのタグは、以下の構造で設計します：
     hour ${Time.at(time).strftime("%H")}
     minute ${Time.at(time).strftime("%M")}
     second ${Time.at(time).strftime("%S")}
-    # 検知したシグニチャ（OpenAppSecログから抽出）
-    detected_signature_raw ${record["signature"] || record["protectionName"] || record["ruleName"] || "unknown"}
-    # 検知したシグニチャを正規化（特殊文字をアンダースコアに置換、小文字化）
-    detected_signature ${record["detected_signature_raw"].downcase.gsub(/[^a-z0-9_-]/, "_")}
   </record>
-  # タグを動的に生成: openappsec.detection.{hostname}.{customer_name}.{fqdn}.{year}.{month}.{day}.{hour}.{detected_signature}
-  tag "openappsec.detection.${record['hostname']}.${record['customer_name']}.${record['fqdn']}.${record['year']}.${record['month']}.${record['day']}.${record['hour']}.${record['detected_signature']}"
+  # タグを動的に生成: openappsec.detection.{hostname}.{customer_name}.{fqdn}.{signature}.{protectionName}.{ruleName}.{year}.{month}.{day}.{hour}
+  tag "openappsec.detection.${record['hostname']}.${record['customer_name']}.${record['fqdn']}.${record['signature']}.${record['protection_name']}.${record['rule_name']}.${record['year']}.${record['month']}.${record['day']}.${record['hour']}"
 </filter>
 ```
 
 **タグ生成の例**:
 - 入力タグ: `openappsec.detection.example1.com`
-- 検知したシグニチャ: `SQL Injection Attempt` → 正規化後: `sql_injection_attempt`
-- 生成タグ: `openappsec.detection.waf-engine-01.customer-a.example1.com.2024.01.15.14.sql_injection_attempt`
+- シグニチャ情報:
+  - `signature`: `SQL Injection Attempt` → 正規化後: `sql_injection_attempt`
+  - `protectionName`: `Threat Prevention Basic` → 正規化後: `threat_prevention_basic`
+  - `ruleName`: `Rule-001` → 正規化後: `rule_001`
+- 生成タグ: `openappsec.detection.waf-engine-01.customer-a.example1.com.sql_injection_attempt.threat_prevention_basic.rule_001.2024.01.15.14`
 
 #### 2. メタデータの追加
 
