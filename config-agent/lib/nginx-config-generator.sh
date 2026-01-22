@@ -99,6 +99,14 @@ generate_nginx_configs() {
             backend_path=""
         fi
         
+        # 顧客名を取得（ログに含めるため）
+        local customer_name
+        customer_name=$(echo "$config_data" | jq -r '.customer_name // "default"')
+        if [ $? -ne 0 ] || [ -z "$customer_name" ]; then
+            echo "⚠️  警告: customer_nameが取得できません。デフォルト値を使用します" >&2
+            customer_name="default"
+        fi
+        
         # バックエンドURLを構築
         local backend_url
         if [ -n "$backend_path" ]; then
@@ -118,9 +126,13 @@ server {
     listen 80;
     server_name ${fqdn};
 
-    # アクセスログ（FQDN別）
-    access_log /var/log/nginx/${fqdn}.access.log main;
-    error_log /var/log/nginx/${fqdn}.error.log warn;
+    # 顧客名を変数に設定（ログフォーマットで使用）
+    set \$customer_name "${customer_name}";
+
+    # アクセスログ（FQDN別ディレクトリ、JSON形式）
+    # ログディレクトリを自動作成（Nginx起動時に必要）
+    access_log /var/log/nginx/${fqdn}/access.log json_combined;
+    error_log /var/log/nginx/${fqdn}/error.log warn;
 
     location / {
         # バックエンドへのプロキシ

@@ -11,6 +11,10 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       # 設定ファイル変更監視スクリプト（Dockerソケットがマウントされていない場合の代替手段）
       - ./nginx/watch-config.sh:/usr/local/bin/watch-config.sh:ro
+      # ログファイル（共有ボリューム方式の場合）
+      - ./nginx/logs:/var/log/nginx:rw
+      # logrotate設定
+      - ./nginx/logrotate.d:/etc/logrotate.d:ro
       # 共有メモリ: OpenAppSec AgentとのIPC通信に使用
       # 公式ドキュメント推奨のマウントポイント: /dev/shm/check-point
       - nginx-shm:/dev/shm/check-point
@@ -40,8 +44,13 @@ services:
       "
     restart: unless-stopped
     logging:
-      driver: "json-file"
+      # ログドライバ方式を選択する場合: driver: "fluentd"
+      driver: "${NGINX_LOG_DRIVER:-json-file}"
       options:
+        # ログドライバ方式の場合のオプション例
+        # fluentd-address: "${NGINX_LOG_OPT_FLUENTD_ADDRESS:-fluentd:24224}"
+        # tag: "${NGINX_LOG_OPT_TAG:-nginx.{{.Name}}}"
+        # デフォルト（json-file）の場合、オプションは不要
         max-size: "10m"
         max-file: "3"
 
@@ -55,6 +64,8 @@ services:
     volumes:
       # OpenAppSec設定ファイルのマウント（公式推奨パス）
       - ./openappsec/local_policy.yaml:/ext/appsec/local_policy.yaml:ro
+      # ログファイル（共有ボリューム方式の場合）
+      - ./openappsec/logs:/var/log/nano_agent:rw
       # 共有メモリ: NginxとのIPC通信に使用
       # 公式ドキュメント推奨のマウントポイント: /dev/shm/check-point
       - nginx-shm:/dev/shm/check-point
@@ -82,8 +93,13 @@ services:
     command: /cp-nano-agent
     restart: unless-stopped
     logging:
-      driver: "json-file"
+      # ログドライバ方式を選択する場合: driver: "fluentd"
+      driver: "${OPENAPPSEC_LOG_DRIVER:-json-file}"
       options:
+        # ログドライバ方式の場合のオプション例
+        # fluentd-address: "${OPENAPPSEC_LOG_OPT_FLUENTD_ADDRESS:-fluentd:24224}"
+        # tag: "${OPENAPPSEC_LOG_OPT_TAG:-openappsec.{{.Name}}}"
+        # デフォルト（json-file）の場合、オプションは不要
         max-size: "10m"
         max-file: "3"
 
@@ -146,6 +162,49 @@ services:
       - mwd-network
     depends_on:
       - mock-api
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  fluentd:
+    # Fluentdログ収集・転送サービス
+    image: fluent/fluentd:v1.16-debian-1
+    container_name: mwd-fluentd
+    volumes:
+      # Fluentd設定ファイル
+      - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf:ro
+      # Nginxログ（共有ボリューム方式の場合、読み取り専用）
+      - ./nginx/logs:/var/log/nginx:ro
+      # OpenAppSecログ（共有ボリューム方式の場合、読み取り専用）
+      - ./openappsec/logs:/var/log/nano_agent:ro
+      # Fluentdのpos_fileとバッファ（永続ボリューム、共有ボリューム方式の場合必須）
+      - ./fluentd/log:/var/log/fluentd:rw
+      # OpenAppSec FQDN別ログ出力用（オプション、Fluentdで生成）
+      # 注意: 監視対象のパスとは別のディレクトリに出力することで、ログの無限ループを防止
+      - ./openappsec/logs-fqdn:/var/log/fluentd/output/openappsec_fqdn:rw
+    ports:
+      # ログドライバ方式の場合、Fluentd Forward Protocol用
+      - "24224:24224"
+      - "24224:24224/udp"
+    environment:
+      - FLUENTD_OUTPUT_URL=${FLUENTD_OUTPUT_URL:-stdout}
+      - FLUENTD_OUTPUT_METHOD=${FLUENTD_OUTPUT_METHOD:-stdout}
+      - FLUENTD_OUTPUT_AUTH=${FLUENTD_OUTPUT_AUTH:-}
+      # ログ収集方式の選択
+      - LOG_COLLECTION_METHOD=${LOG_COLLECTION_METHOD:-shared-volume}
+      # shared-volume: 共有ボリューム方式（デフォルト）
+      # log-driver: ログドライバ方式
+      # hybrid: ハイブリッド方式
+      - HOSTNAME=${HOSTNAME:-waf-engine-01}
+      - CUSTOMER_NAME=${CUSTOMER_NAME:-default}
+    networks:
+      - mwd-network
+    depends_on:
+      - nginx
+      - openappsec-agent
     restart: unless-stopped
     logging:
       driver: "json-file"
