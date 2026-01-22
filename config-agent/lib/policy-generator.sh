@@ -220,8 +220,8 @@ EOF
         fi
     else
         # yqが利用できない場合は、基本的な検証のみ
-        echo "✅ OpenAppSec設定ファイルを生成しました: $output_file"
+            echo "✅ OpenAppSec設定ファイルを生成しました: $output_file"
         echo "⚠️  YAML構文の検証にはyqが必要です（オプション）" >&2
-        return 0
+            return 0
     fi
 }
