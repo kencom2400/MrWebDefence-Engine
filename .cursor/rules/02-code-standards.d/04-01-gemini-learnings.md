@@ -11445,3 +11445,202 @@ fi
 **参照**: PR #40 - Task 5.2: 設定取得・動的更新機能実装（Gemini Code Assistレビュー指摘 - 第2回）
 
 ---
+
+### 24-1. Fluentdのpos_fileとワイルドカードパスの対応 🔴 Critical
+
+**問題**: `in_tail`プラグインで`path`にワイルドカード(`*`)を使用する場合、`pos_file`もファイルごとに一意にする必要がある。単一の`pos_file`を使用すると、ログの読み飛ばしや重複読み込みが発生する
+
+**解決策**: `pos_file`にもワイルドカードを使用して、ファイルごとに一意の`pos_file`を生成する
+
+```aconf
+# ❌ 悪い例: ワイルドカードパスに対して単一のpos_file
+<source>
+  @type tail
+  path /var/log/nginx/*/access.log
+  pos_file /var/log/fluentd/nginx.access.pos
+  # すべてのFQDNログに対して単一のpos_fileを使用 → ログの重複や読み飛ばしが発生
+</source>
+
+# ✅ 良い例: pos_fileにもワイルドカードを使用
+<source>
+  @type tail
+  path /var/log/nginx/*/access.log
+  pos_file /var/log/fluentd/nginx.access.*.pos
+  # 各FQDNログファイルごとに一意のpos_fileが生成される
+</source>
+```
+
+**理由**:
+- 各ログファイルの読み取り位置を個別に管理する必要がある
+- 単一の`pos_file`では、複数ファイルの読み取り位置が混在し、正確な位置管理ができない
+
+**参照**: PR #41 - Task 5.3: ログ転送機能実装（Gemini Code Assistレビュー指摘）
+
+---
+
+### 24-2. Docker Composeのボリュームマウントの重複回避 🔴 Critical
+
+**問題**: 同じコンテナパスを複数の異なるホストパスにマウントしようとすると、Dockerの仕様上エラーとなる
+
+**解決策**: 監視対象のパスとは別のディレクトリに出力する
+
+```yaml
+# ❌ 悪い例: 同じコンテナパスを2つの異なるホストパスにマウント
+volumes:
+  - ./openappsec/logs:/var/log/nano_agent:ro
+  - ./openappsec/logs-fqdn:/var/log/nano_agent:rw  # エラー: 重複マウント
+
+# ✅ 良い例: 監視対象とは別のディレクトリに出力
+volumes:
+  - ./openappsec/logs:/var/log/nano_agent:ro
+  - ./openappsec/logs-fqdn:/var/log/fluentd/output/openappsec_fqdn:rw
+  # 監視対象のパスとは別のディレクトリに出力することで、ログの無限ループを防止
+```
+
+**理由**:
+- Dockerは同じコンテナパスを複数のホストパスにマウントできない
+- 監視対象のパスに出力すると、ログの無限ループが発生する可能性がある
+
+**参照**: PR #41 - Task 5.3: ログ転送機能実装（Gemini Code Assistレビュー指摘）
+
+---
+
+### 24-3. Docker Composeのlogging.optionsのYAML形式 🔴 High
+
+**問題**: `docker-compose.yml`の`logging.options`はマップ形式であり、環境変数で単一の文字列を渡すことはできない
+
+**解決策**: YAMLマップ形式で個別のオプションを指定する
+
+```yaml
+# ❌ 悪い例: 環境変数で単一文字列を渡そうとする
+logging:
+  driver: "${NGINX_LOG_DRIVER:-json-file}"
+  options:
+    ${NGINX_LOG_DRIVER_OPTIONS:-}  # エラー: YAMLとして解釈できない
+
+# ✅ 良い例: YAMLマップ形式で個別のオプションを指定
+logging:
+  driver: "${NGINX_LOG_DRIVER:-json-file}"
+  options:
+    # ログドライバ方式の場合のオプション例
+    fluentd-address: "${NGINX_LOG_OPT_FLUENTD_ADDRESS:-fluentd:24224}"
+    tag: "${NGINX_LOG_OPT_TAG:-nginx.{{.Name}}}"
+    # デフォルト（json-file）の場合、オプションは不要
+```
+
+**理由**:
+- Docker Composeの`logging.options`はYAMLマップ形式である必要がある
+- 環境変数で単一文字列を渡すと、YAMLの解析エラーが発生する
+
+**参照**: PR #41 - Task 5.3: ログ転送機能実装（Gemini Code Assistレビュー指摘）
+
+---
+
+### 24-4. Fluentdの認証情報の取り扱い設計 🔴 High
+
+**問題**: 認証情報として環境変数が定義されているが、`out_http`プラグインの設定でどのように利用されるかの設計が記載されていない
+
+**解決策**: 認証方式（Bearerトークン、Basic認証等）と設定方法を明記する
+
+```aconf
+# ❌ 悪い例: 認証情報の取り扱いが不明確
+<match {nginx,openappsec}.**>
+  @type http
+  endpoint "#{ENV['FLUENTD_OUTPUT_URL']}"
+  # FLUENTD_OUTPUT_AUTHの使用方法が不明
+</match>
+
+# ✅ 良い例: 認証方式と設定方法を明記
+<match {nginx,openappsec}.**>
+  @type http
+  endpoint "#{ENV['FLUENTD_OUTPUT_URL']}"
+  http_method post
+  # Bearerトークン認証の場合
+  <headers>
+    Authorization "Bearer #{ENV['FLUENTD_OUTPUT_AUTH']}"
+  </headers>
+  # Basic認証の場合（コメントアウト）
+  # <headers>
+  #   Authorization "Basic #{ENV['FLUENTD_OUTPUT_AUTH']}"
+  # </headers>
+</match>
+```
+
+**理由**:
+- 認証情報が正しく扱われないと、セキュリティリスクに繋がる
+- 具体的な認証方式と設定方法を明記することで、実装時の誤りを防ぐ
+
+**参照**: PR #41 - Task 5.3: ログ転送機能実装（Gemini Code Assistレビュー指摘）
+
+---
+
+### 24-5. Nginxエラーログのタイムスタンプ精度 🟡 Medium
+
+**問題**: Nginxエラーログで`@type none`パーサーを使用すると、後続の`record_transformer`フィルタで`Time.at(time)`を使用しても、ログレコードに記録された時刻ではなく、Fluentdがログを読み込んだ時刻が使われてしまう
+
+**解決策**: エラーログの形式に合わせた正規表現パーサーを使用する
+
+```aconf
+# ❌ 悪い例: @type noneでタイムスタンプが正確に取得できない
+<source>
+  @type tail
+  path /var/log/nginx/*/error.log
+  <parse>
+    @type none
+    # ログレコードの時刻が取得できない
+  </parse>
+</source>
+
+# ✅ 良い例: エラーログの形式に合わせた正規表現パーサーを使用
+<source>
+  @type tail
+  path /var/log/nginx/*/error.log
+  <parse>
+    # Nginxエラーログの形式: YYYY/MM/DD HH:MM:SS [level] pid.tid: message
+    @type regexp
+    expression /^(?<time>\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}) \[(?<level>[^\]]+)\] (?<pid>\d+).(?<tid>\d+): (?<message>.*)$/
+    time_format %Y/%m/%d %H:%M:%S
+  </parse>
+</source>
+```
+
+**理由**:
+- ログレコードに記録された正確な発生時刻を取得する必要がある
+- 正規表現パーサーを使用することで、ログの形式に合わせてタイムスタンプを抽出できる
+
+**参照**: PR #41 - Task 5.3: ログ転送機能実装（Gemini Code Assistレビュー指摘）
+
+---
+
+### 24-6. ログフォーマットとレコードフィールドの整合性 🟡 Medium
+
+**問題**: `record_transformer`フィルタで`${record["customer_name"]}`を使用しているが、Nginxの`log_format`定義に`customer_name`に相当するフィールドが含まれていない
+
+**解決策**: `log_format`に`customer_name`を追加するか、別の方法で`customer_name`をレコードに付与する設計を明確化する
+
+```nginx
+# ❌ 悪い例: log_formatにcustomer_nameが含まれていない
+log_format json_combined escape=json
+  '{'
+    '"time":"$time_iso8601",'
+    '"host":"$host"'
+    # customer_nameが含まれていない
+  '}';
+
+# ✅ 良い例: log_formatにcustomer_nameを追加
+log_format json_combined escape=json
+  '{'
+    '"time":"$time_iso8601",'
+    '"host":"$host",'
+    '"customer_name":"$customer_name"'
+  '}';
+# ConfigAgentがNginx設定ファイル生成時に、set $customer_name "customer-name"; を追加
+```
+
+**理由**:
+- `record_transformer`で使用するフィールドは、ログフォーマットに含まれている必要がある
+- 設計を明確化することで、実装時の誤りを防ぐ
+
+**参照**: PR #41 - Task 5.3: ログ転送機能実装（Gemini Code Assistレビュー指摘）
+
+---

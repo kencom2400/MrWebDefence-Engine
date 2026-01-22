@@ -388,7 +388,7 @@ FQDN別のログファイルを個別に処理する場合:
   @type tail
   @id nginx_access_all
   path /var/log/nginx/*/access.log
-  pos_file /var/log/fluentd/nginx.access.pos
+  pos_file /var/log/fluentd/nginx.access.*.pos
   tag nginx.access.${File.dirname(path).split('/').last}
   <parse>
     @type json

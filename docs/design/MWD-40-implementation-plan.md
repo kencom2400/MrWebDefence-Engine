@@ -332,6 +332,15 @@ OpenAppSecのログJSONには、リクエストのホスト情報（FQDN）が�
 - `FLUENTD_OUTPUT_URL`: ログ転送先URL（デフォルト: stdout）
 - `FLUENTD_OUTPUT_METHOD`: 転送方法（http, forward, stdout）
 - `FLUENTD_OUTPUT_AUTH`: 認証情報（必要に応じて）
+  - Bearerトークン認証の場合: トークン文字列を設定
+  - Basic認証の場合: `username:password`をBase64エンコードした文字列を設定
+  - 認証が不要な場合: 未設定（空文字列）
+
+**認証方式の設定**:
+- `out_http`プラグインの`<headers>`セクションで認証ヘッダーを設定
+- Bearerトークン認証: `Authorization: Bearer #{ENV['FLUENTD_OUTPUT_AUTH']}`
+- Basic認証: `Authorization: Basic #{ENV['FLUENTD_OUTPUT_AUTH']}`
+- 認証方式は環境変数または設定ファイルで切り替え可能
 
 #### Phase 4.2: Fluentd出力プラグインの設定
 
@@ -399,7 +408,10 @@ services:
       # ログドライバ方式を選択する場合: driver: "fluentd"
       driver: "${NGINX_LOG_DRIVER:-json-file}"
       options:
-        ${NGINX_LOG_DRIVER_OPTIONS:-}
+        # ログドライバ方式の場合のオプション例
+        # fluentd-address: "${NGINX_LOG_OPT_FLUENTD_ADDRESS:-fluentd:24224}"
+        # tag: "${NGINX_LOG_OPT_TAG:-nginx.{{.Name}}}"
+        # デフォルト（json-file）の場合、オプションは不要
 
   openappsec-agent:
     volumes:
@@ -413,7 +425,10 @@ services:
       # ログドライバ方式を選択する場合: driver: "fluentd"
       driver: "${OPENAPPSEC_LOG_DRIVER:-json-file}"
       options:
-        ${OPENAPPSEC_LOG_DRIVER_OPTIONS:-}
+        # ログドライバ方式の場合のオプション例
+        # fluentd-address: "${OPENAPPSEC_LOG_OPT_FLUENTD_ADDRESS:-fluentd:24224}"
+        # tag: "${OPENAPPSEC_LOG_OPT_TAG:-openappsec.{{.Name}}}"
+        # デフォルト（json-file）の場合、オプションは不要
 
   fluentd:
     image: fluent/fluentd:v1.16-debian-1
@@ -428,7 +443,8 @@ services:
       # Fluentdのpos_fileとバッファ（永続ボリューム、共有ボリューム方式の場合必須）
       - ./fluentd/log:/var/log/fluentd:rw
       # OpenAppSec FQDN別ログ出力用（オプション、Fluentdで生成）
-      - ./openappsec/logs-fqdn:/var/log/nano_agent:rw
+      # 注意: 監視対象のパスとは別のディレクトリに出力することで、ログの無限ループを防止
+      - ./openappsec/logs-fqdn:/var/log/fluentd/output/openappsec_fqdn:rw
     ports:
       # ログドライバ方式の場合、Fluentd Forward Protocol用
       - "24224:24224"
@@ -465,7 +481,7 @@ services:
   @type tail
   @id nginx_access
   path /var/log/nginx/*/access.log
-  pos_file /var/log/fluentd/nginx.access.pos
+  pos_file /var/log/fluentd/nginx.access.*.pos
   tag nginx.access.${File.dirname(path).split('/').last}
   # 一時的なタグ（FQDNのみ）: nginx.access.example1.com
   <parse>
@@ -509,11 +525,14 @@ services:
   @type tail
   @id nginx_error
   path /var/log/nginx/*/error.log
-  pos_file /var/log/fluentd/nginx.error.pos
+  pos_file /var/log/fluentd/nginx.error.*.pos
   tag nginx.error.${File.dirname(path).split('/').last}
   # 一時的なタグ（FQDNのみ）: nginx.error.example1.com
   <parse>
-    @type none
+    # Nginxエラーログの形式: YYYY/MM/DD HH:MM:SS [level] pid.tid: message
+    @type regexp
+    expression /^(?<time>\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}) \[(?<level>[^\]]+)\] (?<pid>\d+).(?<tid>\d+): (?<message>.*)$/
+    time_format %Y/%m/%d %H:%M:%S
   </parse>
   @if "#{ENV['LOG_COLLECTION_METHOD']}" == "shared-volume" || "#{ENV['LOG_COLLECTION_METHOD']}" == "hybrid"
 </source>
@@ -614,6 +633,15 @@ services:
   @type http
   endpoint "#{ENV['FLUENTD_OUTPUT_URL']}"
   http_method post
+  # 認証情報の設定（環境変数から取得）
+  # Bearerトークン認証の場合
+  <headers>
+    Authorization "Bearer #{ENV['FLUENTD_OUTPUT_AUTH']}"
+  </headers>
+  # Basic認証の場合（コメントアウト）
+  # <headers>
+  #   Authorization "Basic #{ENV['FLUENTD_OUTPUT_AUTH']}"
+  # </headers>
   <buffer>
     @type file
     path /var/log/fluentd/buffer
@@ -637,6 +665,7 @@ services:
 
 ```nginx
 # JSON形式のログフォーマット
+# 注意: customer_nameはConfigAgentが設定ファイル生成時に追加する変数（$customer_name）を使用
 log_format json_combined escape=json
   '{'
     '"time":"$time_iso8601",'
@@ -650,7 +679,8 @@ log_format json_combined escape=json
     '"http_x_forwarded_for":"$http_x_forwarded_for",'
     '"request_time":$request_time,'
     '"upstream_response_time":"$upstream_response_time",'
-    '"host":"$host"'
+    '"host":"$host",'
+    '"customer_name":"$customer_name"'
   '}';
 
 # 従来のログフォーマット（互換性のため保持）
@@ -659,7 +689,6 @@ log_format main '$remote_addr - $remote_user [$time_local] "$request" '
                 '"$http_user_agent" "$http_x_forwarded_for"';
 
 # デフォルトのアクセスログ（JSON形式）
-    # デフォルトのアクセスログ（JSON形式）
     access_log /var/log/nginx/access.log json_combined;
     
     # FQDN別ログは conf.d/{fqdn}.conf で設定
@@ -906,8 +935,11 @@ Fluentdのタグは、以下の構造で設計します：
 3. **デフォルト値**: `"default"`
 
 **実装方針**:
-- ConfigAgentが管理APIから取得した設定情報に顧客名が含まれている場合、Nginxのログフォーマットに追加
-- OpenAppSecのログには、ConfigAgentが設定ファイルに顧客名を追加（将来的な拡張）
+- **Nginxログ**: ConfigAgentが管理APIから取得した設定情報に顧客名が含まれている場合、Nginxの`log_format`に`$customer_name`変数を追加
+  - `log_format json_combined`に`"customer_name":"$customer_name"`を追加（上記の設定例を参照）
+  - ConfigAgentがNginx設定ファイル生成時に、`set $customer_name "customer-name";`を追加
+- **OpenAppSecログ**: ConfigAgentが設定ファイルに顧客名を追加（将来的な拡張）
+  - 現時点では、環境変数`CUSTOMER_NAME`から取得するか、デフォルト値を使用
 
 ## 受け入れ条件
 
