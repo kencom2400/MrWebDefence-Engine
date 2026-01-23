@@ -50,8 +50,73 @@ echo ""
 # テスト用FQDNリスト
 FQDNS=("test.example.com" "example1.com" "example2.com" "example3.com")
 
-# 1. Fluentdコンテナの状態確認
-echo "📋 1. Fluentdコンテナの状態確認"
+# 必要なサービスリスト
+REQUIRED_SERVICES=("nginx" "openappsec-agent" "fluentd")
+
+# 0. 既存コンテナの停止
+echo "📋 0. 既存コンテナの停止"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+RUNNING_SERVICES=()
+
+for service in "${REQUIRED_SERVICES[@]}"; do
+    if $DOCKER_COMPOSE_CMD ps "$service" 2>/dev/null | grep -q "Up"; then
+        echo "⚠️  ${service}コンテナが起動中です（停止します）"
+        RUNNING_SERVICES+=("$service")
+    else
+        echo "✅ ${service}コンテナは停止しています"
+    fi
+done
+
+# 起動中のサービスがある場合、停止する
+if [ ${#RUNNING_SERVICES[@]} -gt 0 ]; then
+    echo ""
+    echo "🔄 起動中のサービスを停止中: ${RUNNING_SERVICES[*]}"
+    if $DOCKER_COMPOSE_CMD stop "${RUNNING_SERVICES[@]}" 2>&1; then
+        echo "✅ サービスの停止を開始しました"
+        echo "🔄 サービスが停止するまで待機中（3秒）..."
+        sleep 3
+        
+        # 停止確認
+        for service in "${RUNNING_SERVICES[@]}"; do
+            if $DOCKER_COMPOSE_CMD ps "$service" 2>/dev/null | grep -q "Up"; then
+                echo "  ⚠️  ${service}がまだ起動中です（強制停止します）"
+                $DOCKER_COMPOSE_CMD kill "$service" 2>/dev/null || true
+            else
+                echo "  ✅ ${service}が停止しました"
+            fi
+        done
+    else
+        echo "⚠️  サービスの停止に失敗しました（続行します）"
+    fi
+fi
+echo ""
+
+# 1. 必要なサービスの起動
+echo "📋 1. 必要なサービスの起動"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "🔄 必要なサービスを起動中: ${REQUIRED_SERVICES[*]}"
+if $DOCKER_COMPOSE_CMD up -d "${REQUIRED_SERVICES[@]}" 2>&1; then
+    echo "✅ サービスの起動を開始しました"
+    echo "🔄 サービスが起動するまで待機中（10秒）..."
+    sleep 10
+    
+    # 起動確認
+    for service in "${REQUIRED_SERVICES[@]}"; do
+        if $DOCKER_COMPOSE_CMD ps "$service" 2>/dev/null | grep -q "Up"; then
+            echo "  ✅ ${service}が起動しました"
+        else
+            echo "  ⚠️  ${service}の起動を確認中..."
+        fi
+    done
+else
+    echo "❌ サービスの起動に失敗しました"
+    increment_error
+    exit 1
+fi
+echo ""
+
+# 2. Fluentdコンテナの状態確認
+echo "📋 2. Fluentdコンテナの状態確認"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 if $DOCKER_COMPOSE_CMD ps fluentd 2>/dev/null | grep -q "Up"; then
     echo "✅ Fluentdコンテナが起動しています"
@@ -68,14 +133,15 @@ if $DOCKER_COMPOSE_CMD ps fluentd 2>/dev/null | grep -q "Up"; then
     fi
 else
     echo "❌ Fluentdコンテナが起動していません"
-    echo "   起動してください: $DOCKER_COMPOSE_CMD up -d fluentd"
+    echo "   コンテナの状態を確認してください: $DOCKER_COMPOSE_CMD ps fluentd"
+    echo "   ログを確認してください: $DOCKER_COMPOSE_CMD logs fluentd"
     increment_error
     exit 1
 fi
 echo ""
 
-# 2. Fluentd設定ファイルの確認
-echo "📋 2. Fluentd設定ファイルの確認"
+# 3. Fluentd設定ファイルの確認
+echo "📋 3. Fluentd設定ファイルの確認"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 if [ -f "./fluentd/fluent.conf" ]; then
     echo "✅ Fluentd設定ファイルが存在します"
@@ -97,8 +163,8 @@ else
 fi
 echo ""
 
-# 3. ログディレクトリの確認
-echo "📋 3. ログディレクトリの確認"
+# 4. ログディレクトリの確認
+echo "📋 4. ログディレクトリの確認"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Nginxログディレクトリ
@@ -159,8 +225,8 @@ else
 fi
 echo ""
 
-# 4. ログ生成テスト（HTTPリクエストを送信）
-echo "📋 4. ログ生成テスト（HTTPリクエストを送信）"
+# 5. ログ生成テスト（HTTPリクエストを送信）
+echo "📋 5. ログ生成テスト（HTTPリクエストを送信）"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 HTTP_TEST_FAILED=0
 for fqdn in "${FQDNS[@]}"; do
@@ -194,8 +260,8 @@ echo "🔄 ログの書き込みを待機中（3秒）..."
 sleep 3
 echo ""
 
-# 5. NginxログのJSON形式確認
-echo "📋 5. NginxログのJSON形式確認"
+# 6. NginxログのJSON形式確認
+echo "📋 6. NginxログのJSON形式確認"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 JSON_LOG_CHECK_FAILED=0
 for fqdn in "${FQDNS[@]}"; do
@@ -247,8 +313,8 @@ for fqdn in "${FQDNS[@]}"; do
 done
 echo ""
 
-# 6. Fluentdのログ収集確認
-echo "📋 6. Fluentdのログ収集確認"
+# 7. Fluentdのログ収集確認
+echo "📋 7. Fluentdのログ収集確認"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Fluentdのログを確認
@@ -269,8 +335,8 @@ if [ -d "./fluentd/log" ]; then
 fi
 echo ""
 
-# 7. Fluentdの出力確認（stdout）
-echo "📋 7. Fluentdの出力確認（stdout）"
+# 8. Fluentdの出力確認（stdout）
+echo "📋 8. Fluentdの出力確認（stdout）"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Fluentdのstdout出力を確認
@@ -278,8 +344,8 @@ echo "Fluentdのstdout出力（最新10行）:"
 $DOCKER_COMPOSE_CMD logs --tail=10 fluentd 2>/dev/null | grep -E "json|nginx|openappsec" || echo "  関連ログが見つかりません"
 echo ""
 
-# 8. OpenAppSecログの確認
-echo "📋 8. OpenAppSecログの確認"
+# 9. OpenAppSecログの確認
+echo "📋 9. OpenAppSecログの確認"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 if [ -d "./openappsec/logs" ]; then
@@ -305,8 +371,8 @@ else
 fi
 echo ""
 
-# 9. ログローテーション設定の確認
-echo "📋 9. ログローテーション設定の確認"
+# 10. ログローテーション設定の確認
+echo "📋 10. ログローテーション設定の確認"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 if [ -f "./nginx/logrotate.d/nginx" ]; then
@@ -329,8 +395,8 @@ else
 fi
 echo ""
 
-# 10. 環境変数の確認
-echo "📋 10. 環境変数の確認"
+# 11. 環境変数の確認
+echo "📋 11. 環境変数の確認"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 echo "Fluentdコンテナの環境変数:"
