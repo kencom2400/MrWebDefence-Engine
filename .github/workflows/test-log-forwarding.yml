@@ -49,6 +49,11 @@ jobs:
           mkdir -p docker/nginx/logs
           mkdir -p docker/openappsec/logs
           mkdir -p docker/fluentd/log
+          # FQDN別のログディレクトリを作成（Nginx設定ファイル生成前に必要）
+          mkdir -p docker/nginx/logs/test.example.com
+          mkdir -p docker/nginx/logs/example1.com
+          mkdir -p docker/nginx/logs/example2.com
+          mkdir -p docker/nginx/logs/example3.com
 
       - name: Build Fluentd image
         working-directory: docker
