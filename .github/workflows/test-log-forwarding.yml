@@ -65,7 +65,7 @@ jobs:
       - name: Build Fluentd image
         working-directory: docker
         run: |
-          docker build -t docker-fluentd ./fluentd
+          docker build --no-cache -t docker-fluentd ./fluentd
 
       - name: Start services
         working-directory: docker
