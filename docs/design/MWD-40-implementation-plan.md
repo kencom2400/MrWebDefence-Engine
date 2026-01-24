@@ -721,56 +721,67 @@ error_log /var/log/nginx/${fqdn}/error.log warn;
 
 ### タグ構造
 
-Fluentdのタグは、以下の構造で設計します：
+Fluentdのタグは、シンプルな構造で設計します。詳細な情報（hostname、customer_name、fqdn等）はタグではなく、レコード（record）に含めます。
+
+#### 設計方針
+
+- **タグ**: ログの種類とカテゴリのみを含むシンプルな構造
+- **レコード**: 詳細な情報（hostname、customer_name、fqdn、signature等）を含む
+
+この設計により、以下の利点があります：
+- タグが短く、管理しやすい
+- FQDNにドットが含まれる場合でも問題なく処理できる
+- タグの長さ制限を回避できる
+- レコード内の情報で柔軟にフィルタリングやルーティングが可能
 
 #### Nginxログ
 
 ```
-{log_type}.{log_category}.{hostname}.{customer_name}.{fqdn}.{year}.{month}.{day}.{hour}
+{log_type}.{log_category}
 ```
 
 **例**:
-- `nginx.access.waf-engine-01.customer-a.example1.com.2024.01.15.14`
-- `nginx.error.waf-engine-01.customer-a.example1.com.2024.01.15.14`
+- `nginx.access`
+- `nginx.error`
 
 **タグの各要素**:
 - `{log_type}`: `nginx`
 - `{log_category}`: `access` または `error`
-- `{hostname}`: ホスト名（環境変数`HOSTNAME`またはコンテナ名）
-- `{customer_name}`: 顧客名（環境変数`CUSTOMER_NAME`またはログレコードから取得）
-- `{fqdn}`: FQDN名（ファイルパスまたはログレコードから抽出）
-- `{year}`: 年（4桁、例: `2024`）
-- `{month}`: 月（2桁、例: `01`）
-- `{day}`: 日（2桁、例: `15`）
-- `{hour}`: 時間（2桁、例: `14`）
+
+**レコードに含まれる情報**:
+- `log_type`: `"nginx"`
+- `hostname`: ホスト名（環境変数`HOSTNAME`またはコンテナ名）
+- `customer_name`: 顧客名（環境変数`CUSTOMER_NAME`またはログレコードから取得）
+- `fqdn`: FQDN名（ファイルパスまたはログレコードから抽出）
+- `year`, `month`, `day`, `hour`, `minute`, `second`: タイムスタンプ情報
 
 #### OpenAppSecログ
 
 ```
-{log_type}.{log_category}.{hostname}.{customer_name}.{fqdn}.{signature}.{protectionName}.{ruleName}.{year}.{month}.{day}.{hour}
+{log_type}.{log_category}
 ```
 
 **例**:
-- `openappsec.detection.waf-engine-01.customer-a.example1.com.sql-injection-attempt.threat-prevention-basic.rule-001.2024.01.15.14`
-- `openappsec.detection.waf-engine-01.customer-a.example1.com.xss-attempt.xss-protection.rule-002.2024.01.15.14`
+- `openappsec.detection`
 
 **タグの各要素**:
 - `{log_type}`: `openappsec`
 - `{log_category}`: `detection`
-- `{hostname}`: ホスト名（環境変数`HOSTNAME`またはコンテナ名）
-- `{customer_name}`: 顧客名（環境変数`CUSTOMER_NAME`またはログレコードから取得）
-- `{fqdn}`: FQDN名（ログJSONから抽出: `host`, `hostname`, `requestHost`）
-- `{signature}`: シグニチャ（ログJSONから抽出: `signature`。存在しない場合は`unknown`。特殊文字はアンダースコアに正規化）
-- `{protectionName}`: 保護名（ログJSONから抽出: `protectionName`。存在しない場合は`unknown`。特殊文字はアンダースコアに正規化）
-- `{ruleName}`: ルール名（ログJSONから抽出: `ruleName`。存在しない場合は`unknown`。特殊文字はアンダースコアに正規化）
-- `{year}`: 年（4桁、例: `2024`）
-- `{month}`: 月（2桁、例: `01`）
-- `{day}`: 日（2桁、例: `15`）
-- `{hour}`: 時間（2桁、例: `14`）
 
-**注意**: `signature`、`protectionName`、`ruleName`は可変長の文字列で、特殊文字が含まれる可能性があるため、タグに含める前に正規化（特殊文字をアンダースコアに置換、小文字化等）を行います。各フィールドが存在しない場合は`unknown`を使用します。
+**レコードに含まれる情報**:
+- `log_type`: `"openappsec"`
+- `source`: `"waf-engine"`
+- `hostname`: ホスト名（環境変数`HOSTNAME`またはコンテナ名）
+- `customer_name`: 顧客名（環境変数`CUSTOMER_NAME`またはログレコードから取得）
+- `fqdn`: FQDN名（ログJSONから抽出: `host`, `hostname`, `requestHost`）
+- `signature`: シグニチャ（ログJSONから抽出: `signature`。存在しない場合は`unknown`。特殊文字はアンダースコアに正規化）
+- `protection_name`: 保護名（ログJSONから抽出: `protectionName`。存在しない場合は`unknown`。特殊文字はアンダースコアに正規化）
+- `rule_name`: ルール名（ログJSONから抽出: `ruleName`。存在しない場合は`unknown`。特殊文字はアンダースコアに正規化）
+- `year`, `month`, `day`, `hour`, `minute`, `second`: タイムスタンプ情報
 
-### タグに含まれる要素
+**注意**: `signature`、`protection_name`、`rule_name`は可変長の文字列で、特殊文字が含まれる可能性があるため、レコードに含める前に正規化（特殊文字をアンダースコアに置換、小文字化等）を行います。各フィールドが存在しない場合は`unknown`を使用します。
+
+### タグとレコードの役割分担
 
 #### Nginxアクセスログ
 
@@ -778,13 +789,13 @@ Fluentdのタグは、以下の構造で設計します：
 |------|---------|------------|---------------------|
 | ログ種別 | 固定値 | `nginx` | `log_type: "nginx"` |
 | ログカテゴリ | 固定値 | `access` または `error` | - |
-| ホスト名 | 環境変数またはコンテナ名 | `{hostname}` | `hostname` |
-| 顧客名 | 環境変数またはログレコード | `{customer_name}` | `customer_name` |
-| FQDN名 | ファイルパスから抽出 | `{fqdn}` | `fqdn`, `host` |
-| 年 | タイムスタンプから抽出 | `{year}` | `year` |
-| 月 | タイムスタンプから抽出 | `{month}` | `month` |
-| 日 | タイムスタンプから抽出 | `{day}` | `day` |
-| 時間 | タイムスタンプから抽出 | `{hour}` | `hour`, `minute`, `second` |
+| ホスト名 | 環境変数またはコンテナ名 | - | `hostname` |
+| 顧客名 | 環境変数またはログレコード | - | `customer_name` |
+| FQDN名 | ファイルパスから抽出 | - | `fqdn`, `host` |
+| 年 | タイムスタンプから抽出 | - | `year` |
+| 月 | タイムスタンプから抽出 | - | `month` |
+| 日 | タイムスタンプから抽出 | - | `day` |
+| 時間 | タイムスタンプから抽出 | - | `hour`, `minute`, `second` |
 
 #### OpenAppSecログ
 
@@ -792,81 +803,130 @@ Fluentdのタグは、以下の構造で設計します：
 |------|---------|------------|---------------------|
 | ログ種別 | 固定値 | `openappsec` | `log_type: "openappsec"` |
 | ログカテゴリ | 固定値 | `detection` | - |
-| ホスト名 | 環境変数またはコンテナ名 | `{hostname}` | `hostname` |
-| 顧客名 | 環境変数またはログレコード | `{customer_name}` | `customer_name` |
-| FQDN名 | ログJSONから抽出 | `{fqdn}` | `host`, `hostname`, `requestHost` |
-| 年 | タイムスタンプから抽出 | `{year}` | `year` |
-| 月 | タイムスタンプから抽出 | `{month}` | `month` |
-| 日 | タイムスタンプから抽出 | `{day}` | `day` |
-| 時間 | タイムスタンプから抽出 | `{hour}` | `hour`, `minute`, `second` |
-| シグニチャ | ログJSONから抽出 | `{signature}` | `signature` |
-| 保護名 | ログJSONから抽出 | `{protectionName}` | `protectionName` |
-| ルール名 | ログJSONから抽出 | `{ruleName}` | `ruleName` |
+| ホスト名 | 環境変数またはコンテナ名 | - | `hostname` |
+| 顧客名 | 環境変数またはログレコード | - | `customer_name` |
+| FQDN名 | ログJSONから抽出 | - | `fqdn`, `host`, `hostname`, `requestHost` |
+| 年 | タイムスタンプから抽出 | - | `year` |
+| 月 | タイムスタンプから抽出 | - | `month` |
+| 日 | タイムスタンプから抽出 | - | `day` |
+| 時間 | タイムスタンプから抽出 | - | `hour`, `minute`, `second` |
+| シグニチャ | ログJSONから抽出 | - | `signature` |
+| 保護名 | ログJSONから抽出 | - | `protection_name` |
+| ルール名 | ログJSONから抽出 | - | `rule_name` |
 
 ### タグ設計の実装
 
 #### 1. タグの生成
 
-**共有ボリューム方式（Nginx）**:
+タグはシンプルに`{log_type}.{log_category}`のみを含む構造で生成します。詳細な情報（hostname、customer_name、fqdn等）はレコードに含めます。
 
-最初のタグはFQDNのみを含むシンプルな構造で生成し、その後`record_transformer`で完全なタグを生成します。
+**共有ボリューム方式（Nginx）**:
 
 ```aconf
 <source>
   @type tail
   path /var/log/nginx/*/access.log
-  tag nginx.access.${File.dirname(path).split('/').last}
-  # 一時的なタグ例: nginx.access.example1.com
+  tag nginx.access
+  # シンプルなタグ: nginx.access
   <parse>
     @type json
     time_key time
     time_format %Y-%m-%dT%H:%M:%S%z
   </parse>
+  @label @nginx_access_process
 </source>
 
-# 完全なタグを生成（ホスト名、顧客名、FQDN名、年、月、日、時間を含む）
-<filter nginx.access.**>
-  @type record_transformer
-  <record>
-    # メタデータをレコードに追加
-    log_type "nginx"
-    hostname "#{ENV['HOSTNAME'] || Socket.gethostname}"
-    customer_name ${record["customer_name"] || ENV["CUSTOMER_NAME"] || "default"}
-    fqdn ${tag_parts[2]}
-    year ${Time.at(time).strftime("%Y")}
-    month ${Time.at(time).strftime("%m")}
-    day ${Time.at(time).strftime("%d")}
-    hour ${Time.at(time).strftime("%H")}
-    minute ${Time.at(time).strftime("%M")}
-    second ${Time.at(time).strftime("%S")}
-  </record>
-  # タグを動的に生成
-  tag "nginx.access.${record['hostname']}.${record['customer_name']}.${record['fqdn']}.${record['year']}.${record['month']}.${record['day']}.${record['hour']}"
-</filter>
+# メタデータをレコードに追加（タグは変更しない）
+<label @nginx_access_process>
+  <filter **>
+    @type record_transformer
+    enable_ruby true
+    <record>
+      # メタデータをレコードに追加
+      log_type "nginx"
+      hostname "#{ENV['HOSTNAME'] || Socket.gethostname}"
+      customer_name ${record["customer_name"] || ENV["CUSTOMER_NAME"] || "default"}
+      # FQDNはファイルパスから抽出（tag_partsは使用しない）
+      fqdn ${record["host"] || record["fqdn"] || "unknown"}
+      year ${Time.at(time).strftime("%Y")}
+      month ${Time.at(time).strftime("%m")}
+      day ${Time.at(time).strftime("%d")}
+      hour ${Time.at(time).strftime("%H")}
+      minute ${Time.at(time).strftime("%M")}
+      second ${Time.at(time).strftime("%S")}
+    </record>
+  </filter>
+</label>
 ```
 
-**タグ生成の例**:
-- 入力タグ: `nginx.access.example1.com`
-- 生成タグ: `nginx.access.waf-engine-01.customer-a.example1.com.2024.01.15.14`
+**タグとレコードの例**:
+- タグ: `nginx.access`（変更なし）
+- レコード: `{"log_type":"nginx","hostname":"waf-engine-01","customer_name":"customer-a","fqdn":"example1.com","year":"2024","month":"01","day":"15","hour":"14",...}`
 
 **共有ボリューム方式（OpenAppSec）**:
-
-最初のタグは`openappsec.detection`で生成し、その後`rewrite_tag_filter`でFQDN別にタグを付け直し、最後に`record_transformer`で完全なタグを生成します。
 
 ```aconf
 <source>
   @type tail
   path /var/log/nano_agent/*.log
   tag openappsec.detection
-  # 一時的なタグ: openappsec.detection
+  # シンプルなタグ: openappsec.detection
   <parse>
     @type json
     time_key time
     time_format %Y-%m-%dT%H:%M:%S%z
   </parse>
+  @label @openappsec_process
 </source>
 
-# FQDN別にタグを付け直す（中間ステップ）
+# メタデータをレコードに追加（タグは変更しない）
+<label @openappsec_process>
+  <filter **>
+    @type record_transformer
+    enable_ruby true
+    <record>
+      # メタデータをレコードに追加
+      log_type "openappsec"
+      source "waf-engine"
+      hostname "#{ENV['HOSTNAME'] || Socket.gethostname}"
+      customer_name ${record["customer_name"] || ENV["CUSTOMER_NAME"] || "default"}
+      # FQDNはログJSONから抽出
+      fqdn ${record["host"] || record["hostname"] || record["requestHost"] || "unknown"}
+      signature ${(record["signature"] || "unknown").downcase.gsub(/[^a-z0-9_-]/, "_")}
+      protection_name ${(record["protectionName"] || "unknown").downcase.gsub(/[^a-z0-9_-]/, "_")}
+      rule_name ${(record["ruleName"] || "unknown").downcase.gsub(/[^a-z0-9_-]/, "_")}
+      year ${Time.at(time).strftime("%Y")}
+      month ${Time.at(time).strftime("%m")}
+      day ${Time.at(time).strftime("%d")}
+      hour ${Time.at(time).strftime("%H")}
+      minute ${Time.at(time).strftime("%M")}
+      second ${Time.at(time).strftime("%S")}
+    </record>
+  </filter>
+</label>
+```
+
+**タグとレコードの例**:
+- タグ: `openappsec.detection`（変更なし）
+- レコード: `{"log_type":"openappsec","source":"waf-engine","hostname":"waf-engine-01","customer_name":"customer-a","fqdn":"example1.com","signature":"sql_injection_attempt","protection_name":"threat_prevention_basic","rule_name":"rule_001","year":"2024","month":"01","day":"15","hour":"14",...}`
+
+#### 2. FQDN別のルーティング
+
+FQDN別にルーティングする必要がある場合は、`rewrite_tag_filter`を使用してレコードの`fqdn`フィールドに基づいてタグを変更します。
+
+```aconf
+# FQDN別にタグを付け直す（FQDN別ファイル出力用）
+<match openappsec.detection>
+  @type rewrite_tag_filter
+  <rule>
+    key fqdn_for_path
+    pattern /^(.+)$/
+    tag openappsec.fqdn.${1}
+  </rule>
+</match>
+```
+
+ただし、この方法でもFQDNにドットが含まれる場合に問題が発生する可能性があるため、レコードの`fqdn_for_path`フィールド（ドットをアンダースコアに置換した値）を使用します。
 <filter openappsec.detection>
   @type rewrite_tag_filter
   <rule>
