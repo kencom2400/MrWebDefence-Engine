@@ -61,6 +61,9 @@ jobs:
           mkdir -p docker/nginx/logs/example1.com
           mkdir -p docker/nginx/logs/example2.com
           mkdir -p docker/nginx/logs/example3.com
+          # OpenAppSecログディレクトリのパーミッション設定（Fluentdのfluentユーザーが書き込めるように）
+          chmod -R 777 docker/openappsec/logs
+          chmod -R 777 docker/fluentd/log
 
       - name: Build Fluentd image
         working-directory: docker
