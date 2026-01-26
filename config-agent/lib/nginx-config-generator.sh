@@ -101,9 +101,11 @@ generate_nginx_configs() {
         
         # 顧客名を取得（ログに含めるため）
         local customer_name
-        customer_name=$(echo "$config_data" | jq -r '.customer_name // "default"')
-        if [ $? -ne 0 ] || [ -z "$customer_name" ]; then
-            echo "⚠️  警告: customer_nameが取得できません。デフォルト値を使用します" >&2
+        if ! customer_name=$(echo "$config_data" | jq -r '.customer_name // "default"'); then
+            echo "⚠️  警告: customer_nameの取得中にjqエラーが発生しました。デフォルト値を使用します" >&2
+            customer_name="default"
+        elif [ -z "$customer_name" ] || [ "$customer_name" = "null" ]; then
+            echo "⚠️  警告: customer_nameが設定されていません。デフォルト値を使用します" >&2
             customer_name="default"
         fi
         
@@ -116,6 +118,16 @@ generate_nginx_configs() {
         fi
         
         local config_file="${output_dir}/${fqdn}.conf"
+        
+        # FQDN別ログディレクトリを作成（Nginx起動時に必要）
+        # 注意: /var/log/nginxはdocker-compose.ymlでマウントされている必要がある
+        local log_dir="/var/log/nginx/${fqdn}"
+        if ! mkdir -p "$log_dir" 2>/dev/null; then
+            echo "⚠️  警告: ログディレクトリの作成に失敗しました: $log_dir" >&2
+            echo "⚠️  注意: docker-compose.ymlでNginxログボリュームがマウントされていることを確認してください" >&2
+        else
+            echo "✅ ログディレクトリを作成しました: $log_dir"
+        fi
         
         # Nginx設定ファイルを生成
         if ! cat > "$config_file" << EOF

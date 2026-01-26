@@ -383,18 +383,20 @@ FQDN別のログファイルを個別に処理する場合:
 
 ```aconf
 # ワイルドカードを使用（全FQDNを1つの設定で処理）
-# FQDN別ディレクトリ構造により、タグにFQDN名が自動的に含まれる
+# タグはシンプルに{log_type}.{log_category}のみ（例: nginx.access）
+# FQDN情報はレコードに含める（record_transformerで追加）
 <source>
   @type tail
   @id nginx_access_all
   path /var/log/nginx/*/access.log
   pos_file /var/log/fluentd/nginx.access.*.pos
-  tag nginx.access.${File.dirname(path).split('/').last}
+  tag nginx.access
   <parse>
     @type json
     time_key time
     time_format %Y-%m-%dT%H:%M:%S%z
   </parse>
+  @label @nginx_access_process
 </source>
 
 <source>
@@ -402,11 +404,28 @@ FQDN別のログファイルを個別に処理する場合:
   @id nginx_error_all
   path /var/log/nginx/*/error.log
   pos_file /var/log/fluentd/nginx.error.pos
-  tag nginx.error.${File.dirname(path).split('/').last}
+  tag nginx.error
   <parse>
     @type none
   </parse>
+  @label @nginx_error_process
 </source>
+
+# メタデータをレコードに追加（FQDN情報を含む）
+<label @nginx_access_process>
+  <filter **>
+    @type record_transformer
+    enable_ruby true
+    <record>
+      # FQDNはファイルパスから抽出してレコードに追加
+      fqdn ${File.dirname(path).split('/').last}
+      # その他のメタデータも追加
+      log_type "nginx"
+      hostname "#{ENV['HOSTNAME'] || Socket.gethostname}"
+      customer_name ${record["customer_name"] || ENV["CUSTOMER_NAME"] || "default"}
+    </record>
+  </filter>
+</label>
 ```
 
 ### 3. 利点

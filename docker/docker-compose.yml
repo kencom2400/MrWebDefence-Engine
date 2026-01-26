@@ -143,6 +143,8 @@ services:
       - ./openappsec:/app/output/openappsec:rw
       # 出力先: Nginx設定ファイル
       - ./nginx/conf.d:/app/output/nginx/conf.d:rw
+      # Nginxログディレクトリ（FQDN別ディレクトリ作成用）
+      - ./nginx/logs:/var/log/nginx:rw
       # Dockerソケット（Nginxリロード用）
       # セキュリティ警告: Dockerソケットのマウントはセキュリティリスクがあります
       # 本番環境では、共有ボリューム上のシグナルファイルを監視する方法を検討してください
@@ -171,20 +173,28 @@ services:
 
   fluentd:
     # Fluentdログ収集・転送サービス
-    image: fluent/fluentd:v1.16-debian-1
+    # カスタムイメージを使用（必要なプラグインをインストール済み）
+    build:
+      context: ./fluentd
+      dockerfile: Dockerfile
     container_name: mwd-fluentd
     volumes:
-      # Fluentd設定ファイル
+      # Fluentd設定ファイル（メイン設定）
       - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf:ro
+      # Fluentd設定ファイル（モジュール化された設定）
+      - ./fluentd/in.d:/fluentd/etc/in.d:ro
+      - ./fluentd/process.d:/fluentd/etc/process.d:ro
+      - ./fluentd/forwarder.d:/fluentd/etc/forwarder.d:ro
+      - ./fluentd/archive.d:/fluentd/etc/archive.d:ro
       # Nginxログ（共有ボリューム方式の場合、読み取り専用）
       - ./nginx/logs:/var/log/nginx:ro
-      # OpenAppSecログ（共有ボリューム方式の場合、読み取り専用）
-      - ./openappsec/logs:/var/log/nano_agent:ro
+      # OpenAppSecログ（共有ボリューム方式の場合）
+      # 元のログファイル（/var/log/nano_agent/*.log）は読み取り専用で監視
+      # FQDN別ログ（/var/log/nano_agent/{fqdn}/*.log）は書き込み可能で出力
+      # 注意: 元のログファイルとは異なるディレクトリに出力することで、ログの無限ループを防止
+      - ./openappsec/logs:/var/log/nano_agent:rw
       # Fluentdのpos_fileとバッファ（永続ボリューム、共有ボリューム方式の場合必須）
       - ./fluentd/log:/var/log/fluentd:rw
-      # OpenAppSec FQDN別ログ出力用（オプション、Fluentdで生成）
-      # 注意: 監視対象のパスとは別のディレクトリに出力することで、ログの無限ループを防止
-      - ./openappsec/logs-fqdn:/var/log/fluentd/output/openappsec_fqdn:rw
     ports:
       # ログドライバ方式の場合、Fluentd Forward Protocol用
       - "24224:24224"
