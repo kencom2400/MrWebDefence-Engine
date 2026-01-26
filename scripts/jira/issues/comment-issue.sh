@@ -143,6 +143,9 @@ markdown_to_adf() {
             }]')
         elif [[ "$line" =~ ^-\[[[:space:]]*\][[:space:]]+(.*)$ ]]; then
             # チェックボックス（未チェック）
+            # 注意: 現在の実装では、チェックボックスはテキストとしてのみ表示されます
+            # インタラクティブなチェックボックスとして機能させるには、ADF形式で
+            # taskList と taskItem ノードを使用する必要があります
             if [ -n "$current_paragraph" ]; then
                 content_array=$(echo "$content_array" | jq --arg para "$current_paragraph" '. + [{
                     type: "paragraph",
@@ -163,6 +166,9 @@ markdown_to_adf() {
             }]')
         elif [[ "$line" =~ ^-\[x\][[:space:]]+(.*)$ ]]; then
             # チェックボックス（チェック済み）
+            # 注意: 現在の実装では、チェックボックスはテキストとしてのみ表示されます
+            # インタラクティブなチェックボックスとして機能させるには、ADF形式で
+            # taskList と taskItem ノードを使用する必要があります
             if [ -n "$current_paragraph" ]; then
                 content_array=$(echo "$content_array" | jq --arg para "$current_paragraph" '. + [{
                     type: "paragraph",
