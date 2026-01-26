@@ -13,7 +13,7 @@ elif [ -f "${SCRIPT_DIR}/config.sh" ]; then
 fi
 
 # JIRA_BASE_URLのデフォルト値設定（設定ファイルで未設定の場合）
-if [ -z "$JIRA_BASE_URL" ]; then
+if [ -z "${JIRA_BASE_URL:-}" ]; then
   export JIRA_BASE_URL='https://kencom2400.atlassian.net'
 fi
 
