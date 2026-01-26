@@ -178,15 +178,6 @@ services:
       context: ./fluentd
       dockerfile: Dockerfile
     container_name: mwd-fluentd
-    entrypoint: >
-      sh -c "
-      mkdir -p /var/log/nano_agent/test_example_com
-      mkdir -p /var/log/nano_agent/example1_com
-      mkdir -p /var/log/nano_agent/example2_com
-      mkdir -p /var/log/nano_agent/example3_com
-      mkdir -p /var/log/fluentd/buffer/openappsec_fqdn
-      exec tini -- /bin/entrypoint.sh
-      "
     volumes:
       # Fluentd設定ファイル（メイン設定）
       - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf:ro
