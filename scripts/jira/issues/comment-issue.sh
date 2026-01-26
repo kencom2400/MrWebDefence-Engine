@@ -12,18 +12,6 @@ if [ -f "${JIRA_SCRIPT_DIR}/common.sh" ]; then
   source "${JIRA_SCRIPT_DIR}/common.sh"
 fi
 
-# 一時ファイルのパス
-TEMP_FILE=""
-
-# クリーンアップ関数
-cleanup() {
-  if [ -n "$TEMP_FILE" ] && [ -f "$TEMP_FILE" ]; then
-    rm -f "$TEMP_FILE"
-  fi
-}
-
-# 終了時にクリーンアップを実行
-trap cleanup EXIT
 
 # 使用方法を表示
 show_usage() {
@@ -93,20 +81,24 @@ markdown_to_adf() {
     local content_array="[]"
     local current_paragraph=""
     
+    # 段落を追加するヘルパー関数（DRY原則に従って重複を削減）
+    add_paragraph() {
+        if [ -n "$current_paragraph" ]; then
+            content_array=$(echo "$content_array" | jq --arg para "$current_paragraph" '. + [{
+                type: "paragraph",
+                content: [{
+                    type: "text",
+                    text: $para
+                }]
+            }]')
+            current_paragraph=""
+        fi
+    }
+    
     while IFS= read -r line || [ -n "$line" ]; do
         # 見出しの検出（## で始まる行）
         if [[ "$line" =~ ^##[[:space:]]+(.*)$ ]]; then
-            # 前の段落があれば追加
-            if [ -n "$current_paragraph" ]; then
-                content_array=$(echo "$content_array" | jq --arg para "$current_paragraph" '. + [{
-                    type: "paragraph",
-                    content: [{
-                        type: "text",
-                        text: $para
-                    }]
-                }]')
-                current_paragraph=""
-            fi
+            add_paragraph
             # 見出しを追加
             local heading_text="${BASH_REMATCH[1]}"
             content_array=$(echo "$content_array" | jq --arg text "$heading_text" '. + [{
@@ -119,17 +111,7 @@ markdown_to_adf() {
                 }]
             }]')
         elif [[ "$line" =~ ^###[[:space:]]+(.*)$ ]]; then
-            # 前の段落があれば追加
-            if [ -n "$current_paragraph" ]; then
-                content_array=$(echo "$content_array" | jq --arg para "$current_paragraph" '. + [{
-                    type: "paragraph",
-                    content: [{
-                        type: "text",
-                        text: $para
-                    }]
-                }]')
-                current_paragraph=""
-            fi
+            add_paragraph
             # 見出しを追加
             local heading_text="${BASH_REMATCH[1]}"
             content_array=$(echo "$content_array" | jq --arg text "$heading_text" '. + [{
@@ -146,16 +128,7 @@ markdown_to_adf() {
             # 注意: 現在の実装では、チェックボックスはテキストとしてのみ表示されます
             # インタラクティブなチェックボックスとして機能させるには、ADF形式で
             # taskList と taskItem ノードを使用する必要があります
-            if [ -n "$current_paragraph" ]; then
-                content_array=$(echo "$content_array" | jq --arg para "$current_paragraph" '. + [{
-                    type: "paragraph",
-                    content: [{
-                        type: "text",
-                        text: $para
-                    }]
-                }]')
-                current_paragraph=""
-            fi
+            add_paragraph
             local checkbox_text="${BASH_REMATCH[1]}"
             content_array=$(echo "$content_array" | jq --arg text "$checkbox_text" '. + [{
                 type: "paragraph",
@@ -169,16 +142,7 @@ markdown_to_adf() {
             # 注意: 現在の実装では、チェックボックスはテキストとしてのみ表示されます
             # インタラクティブなチェックボックスとして機能させるには、ADF形式で
             # taskList と taskItem ノードを使用する必要があります
-            if [ -n "$current_paragraph" ]; then
-                content_array=$(echo "$content_array" | jq --arg para "$current_paragraph" '. + [{
-                    type: "paragraph",
-                    content: [{
-                        type: "text",
-                        text: $para
-                    }]
-                }]')
-                current_paragraph=""
-            fi
+            add_paragraph
             local checkbox_text="${BASH_REMATCH[1]}"
             content_array=$(echo "$content_array" | jq --arg text "$checkbox_text" '. + [{
                 type: "paragraph",
@@ -189,16 +153,7 @@ markdown_to_adf() {
             }]')
         elif [ -z "$line" ]; then
             # 空行：段落を終了
-            if [ -n "$current_paragraph" ]; then
-                content_array=$(echo "$content_array" | jq --arg para "$current_paragraph" '. + [{
-                    type: "paragraph",
-                    content: [{
-                        type: "text",
-                        text: $para
-                    }]
-                }]')
-                current_paragraph=""
-            fi
+            add_paragraph
         else
             # 通常のテキスト行
             if [ -n "$current_paragraph" ]; then
@@ -210,15 +165,7 @@ markdown_to_adf() {
     done <<< "$text"
     
     # 最後の段落があれば追加
-    if [ -n "$current_paragraph" ]; then
-        content_array=$(echo "$content_array" | jq --arg para "$current_paragraph" '. + [{
-            type: "paragraph",
-            content: [{
-                type: "text",
-                text: $para
-            }]
-        }]')
-    fi
+    add_paragraph
     
     # ADFドキュメントを生成
     echo "$content_array" | jq '{
@@ -272,9 +219,7 @@ fi
 if [ -n "$BODY_FILE" ]; then
     if [ "$BODY_FILE" = "-" ]; then
         # 標準入力から読み込み
-        TEMP_FILE=$(mktemp)
-        cat > "$TEMP_FILE"
-        BODY=$(cat "$TEMP_FILE")
+        BODY=$(cat)
     elif [ ! -f "$BODY_FILE" ]; then
         echo "❌ エラー: ファイルが見つかりません: $BODY_FILE" >&2
         exit 1
