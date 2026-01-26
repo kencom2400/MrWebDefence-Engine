@@ -11,6 +11,10 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       # 設定ファイル変更監視スクリプト（Dockerソケットがマウントされていない場合の代替手段）
       - ./nginx/watch-config.sh:/usr/local/bin/watch-config.sh:ro
+      # ログファイル（共有ボリューム方式の場合）
+      - ./nginx/logs:/var/log/nginx:rw
+      # logrotate設定
+      - ./nginx/logrotate.d:/etc/logrotate.d:ro
       # 共有メモリ: OpenAppSec AgentとのIPC通信に使用
       # 公式ドキュメント推奨のマウントポイント: /dev/shm/check-point
       - nginx-shm:/dev/shm/check-point
@@ -40,8 +44,13 @@ services:
       "
     restart: unless-stopped
     logging:
-      driver: "json-file"
+      # ログドライバ方式を選択する場合: driver: "fluentd"
+      driver: "${NGINX_LOG_DRIVER:-json-file}"
       options:
+        # ログドライバ方式の場合のオプション例
+        # fluentd-address: "${NGINX_LOG_OPT_FLUENTD_ADDRESS:-fluentd:24224}"
+        # tag: "${NGINX_LOG_OPT_TAG:-nginx.{{.Name}}}"
+        # デフォルト（json-file）の場合、オプションは不要
         max-size: "10m"
         max-file: "3"
 
@@ -55,6 +64,8 @@ services:
     volumes:
       # OpenAppSec設定ファイルのマウント（公式推奨パス）
       - ./openappsec/local_policy.yaml:/ext/appsec/local_policy.yaml:ro
+      # ログファイル（共有ボリューム方式の場合）
+      - ./openappsec/logs:/var/log/nano_agent:rw
       # 共有メモリ: NginxとのIPC通信に使用
       # 公式ドキュメント推奨のマウントポイント: /dev/shm/check-point
       - nginx-shm:/dev/shm/check-point
@@ -82,8 +93,13 @@ services:
     command: /cp-nano-agent
     restart: unless-stopped
     logging:
-      driver: "json-file"
+      # ログドライバ方式を選択する場合: driver: "fluentd"
+      driver: "${OPENAPPSEC_LOG_DRIVER:-json-file}"
       options:
+        # ログドライバ方式の場合のオプション例
+        # fluentd-address: "${OPENAPPSEC_LOG_OPT_FLUENTD_ADDRESS:-fluentd:24224}"
+        # tag: "${OPENAPPSEC_LOG_OPT_TAG:-openappsec.{{.Name}}}"
+        # デフォルト（json-file）の場合、オプションは不要
         max-size: "10m"
         max-file: "3"
 
@@ -127,6 +143,8 @@ services:
       - ./openappsec:/app/output/openappsec:rw
       # 出力先: Nginx設定ファイル
       - ./nginx/conf.d:/app/output/nginx/conf.d:rw
+      # Nginxログディレクトリ（FQDN別ディレクトリ作成用）
+      - ./nginx/logs:/var/log/nginx:rw
       # Dockerソケット（Nginxリロード用）
       # セキュリティ警告: Dockerソケットのマウントはセキュリティリスクがあります
       # 本番環境では、共有ボリューム上のシグナルファイルを監視する方法を検討してください
@@ -146,6 +164,57 @@ services:
       - mwd-network
     depends_on:
       - mock-api
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  fluentd:
+    # Fluentdログ収集・転送サービス
+    # カスタムイメージを使用（必要なプラグインをインストール済み）
+    build:
+      context: ./fluentd
+      dockerfile: Dockerfile
+    container_name: mwd-fluentd
+    volumes:
+      # Fluentd設定ファイル（メイン設定）
+      - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf:ro
+      # Fluentd設定ファイル（モジュール化された設定）
+      - ./fluentd/in.d:/fluentd/etc/in.d:ro
+      - ./fluentd/process.d:/fluentd/etc/process.d:ro
+      - ./fluentd/forwarder.d:/fluentd/etc/forwarder.d:ro
+      - ./fluentd/archive.d:/fluentd/etc/archive.d:ro
+      # Nginxログ（共有ボリューム方式の場合、読み取り専用）
+      - ./nginx/logs:/var/log/nginx:ro
+      # OpenAppSecログ（共有ボリューム方式の場合）
+      # 元のログファイル（/var/log/nano_agent/*.log）は読み取り専用で監視
+      # FQDN別ログ（/var/log/nano_agent/{fqdn}/*.log）は書き込み可能で出力
+      # 注意: 元のログファイルとは異なるディレクトリに出力することで、ログの無限ループを防止
+      - ./openappsec/logs:/var/log/nano_agent:rw
+      # Fluentdのpos_fileとバッファ（永続ボリューム、共有ボリューム方式の場合必須）
+      - ./fluentd/log:/var/log/fluentd:rw
+    ports:
+      # ログドライバ方式の場合、Fluentd Forward Protocol用
+      - "24224:24224"
+      - "24224:24224/udp"
+    environment:
+      - FLUENTD_OUTPUT_URL=${FLUENTD_OUTPUT_URL:-stdout}
+      - FLUENTD_OUTPUT_METHOD=${FLUENTD_OUTPUT_METHOD:-stdout}
+      - FLUENTD_OUTPUT_AUTH=${FLUENTD_OUTPUT_AUTH:-}
+      # ログ収集方式の選択
+      - LOG_COLLECTION_METHOD=${LOG_COLLECTION_METHOD:-shared-volume}
+      # shared-volume: 共有ボリューム方式（デフォルト）
+      # log-driver: ログドライバ方式
+      # hybrid: ハイブリッド方式
+      - HOSTNAME=${HOSTNAME:-waf-engine-01}
+      - CUSTOMER_NAME=${CUSTOMER_NAME:-default}
+    networks:
+      - mwd-network
+    depends_on:
+      - nginx
+      - openappsec-agent
     restart: unless-stopped
     logging:
       driver: "json-file"

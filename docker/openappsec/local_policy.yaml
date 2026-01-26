@@ -1,10 +1,10 @@
 apiVersion: v1beta2
 policies:
   default:
-    mode: detect-learn
-    threatPreventionPractices: []
+    mode: prevent-learn
+    threatPreventionPractices: [threat-prevention-basic]
     accessControlPractices: []
-    triggers: []
+    triggers: [log-trigger-basic]
     customResponse: 403
     sourceIdentifiers: ""
     trustedSources: ""
@@ -12,38 +12,107 @@ policies:
 
   specificRules:
     - host: "test.example.com"
-      mode: detect-learn
-      threatPreventionPractices: []
+      mode: prevent-learn
+      threatPreventionPractices: [threat-prevention-basic]
       accessControlPractices: []
-      triggers: []
+      triggers: [log-trigger-basic]
       customResponse: 403
       sourceIdentifiers: ""
       trustedSources: ""
       exceptions: []
     - host: "example1.com"
-      mode: detect-learn
-      threatPreventionPractices: []
+      mode: prevent-learn
+      threatPreventionPractices: [threat-prevention-basic]
       accessControlPractices: []
-      triggers: []
+      triggers: [log-trigger-basic]
       customResponse: 403
       sourceIdentifiers: ""
       trustedSources: ""
       exceptions: []
     - host: "example2.com"
-      mode: detect-learn
-      threatPreventionPractices: []
+      mode: prevent-learn
+      threatPreventionPractices: [threat-prevention-basic]
       accessControlPractices: []
-      triggers: []
+      triggers: [log-trigger-basic]
       customResponse: 403
       sourceIdentifiers: ""
       trustedSources: ""
       exceptions: []
     - host: "example3.com"
-      mode: detect-learn
-      threatPreventionPractices: []
+      mode: prevent-learn
+      threatPreventionPractices: [threat-prevention-basic]
       accessControlPractices: []
-      triggers: []
+      triggers: [log-trigger-basic]
       customResponse: 403
       sourceIdentifiers: ""
       trustedSources: ""
       exceptions: []
+
+# 脅威防止プラクティス定義
+threatPreventionPractices:
+  - name: threat-prevention-basic
+    practiceMode: prevent
+    webAttacks:
+      overrideMode: prevent
+      minimumConfidence: medium
+      maxUrlSizeBytes: 32768
+      maxObjectDepth: 40
+      maxBodySizeKb: 10000
+      maxHeaderSizeBytes: 102400
+      protections:
+        csrfProtection: prevent
+        errorDisclosure: prevent
+        openRedirect: prevent
+        nonValidHttpMethods: true
+    intrusionPrevention:
+      overrideMode: inherited
+      maxPerformanceImpact: medium
+      minSeverityLevel: medium
+      minCveYear: 2016
+      highConfidenceEventAction: prevent
+      mediumConfidenceEventAction: prevent
+      lowConfidenceEventAction: detect
+    fileSecurity:
+      overrideMode: inherited
+      minSeverityLevel: medium
+      highConfidenceEventAction: prevent
+      mediumConfidenceEventAction: prevent
+      lowConfidenceEventAction: detect
+    snortSignatures:
+      overrideMode: inherited
+      configmap: []
+      files: []
+    schemaValidation:
+      overrideMode: inherited
+      configmap: []
+      files: []
+    antiBot:
+      overrideMode: inherited
+      injectedUris: []
+      validatedUris: []
+
+# ログトリガー定義
+logTriggers:
+  - name: log-trigger-basic
+    accessControlLogging:
+      allowEvents: false
+      dropEvents: true
+    appsecLogging:
+      detectEvents: true
+      preventEvents: true
+      allWebRequests: false
+    extendedLogging:
+      urlPath: true
+      urlQuery: true
+      httpHeaders: false
+      requestBody: false
+    additionalSuspiciousEventsLogging:
+      enabled: true
+      minSeverity: high
+      responseBody: false
+      responseCode: true
+    logDestination:
+      cloud: false
+      logToAgent: true
+      stdout:
+        format: json

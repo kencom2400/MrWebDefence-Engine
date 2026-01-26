@@ -45,16 +45,18 @@ PR #41に対するGemini Code Assistとユーザーからのレビューコメ�
 
 - [x] **8. Nginxアクセスログのタグ設計**
   - ✅ タグ設計セクションを追加
-  - ✅ ホスト名、顧客名、FQDN名、年、月、日、時間を含むタグ構造を設計
+  - ✅ シンプルなタグ構造を設計（`{log_type}.{log_category}`のみ）
+  - ✅ ホスト名、顧客名、FQDN名、年、月、日、時間はレコードに含める設計に変更
   - ✅ `record_transformer`プラグインの設定例を追加
-  - ✅ タグ形式: `nginx.access.{hostname}.{customer_name}.{fqdn}.{year}.{month}.{day}.{hour}`
+  - ✅ タグ形式: `nginx.access`（レコードに詳細情報を含む）
 
 - [x] **9. OpenAppSecログのタグ設計**
   - ✅ タグ設計セクションを追加
-  - ✅ ホスト名、顧客名、FQDN名、signature、protectionName、ruleName、年、月、日、時間を含むタグ構造を設計
+  - ✅ シンプルなタグ構造を設計（`{log_type}.{log_category}`のみ）
+  - ✅ ホスト名、顧客名、FQDN名、signature、protectionName、ruleName、年、月、日、時間はレコードに含める設計に変更
   - ✅ `record_transformer`プラグインの設定例を追加
   - ✅ signature、protectionName、ruleNameの正規化処理を追加
-  - ✅ タグ形式: `openappsec.detection.{hostname}.{customer_name}.{fqdn}.{signature}.{protectionName}.{ruleName}.{year}.{month}.{day}.{hour}`
+  - ✅ タグ形式: `openappsec.detection`（レコードに詳細情報を含む）
 
 ## 追加対応項目
 
@@ -91,8 +93,9 @@ PR #41に対するGemini Code Assistとユーザーからのレビューコメ�
 
 2. **タグ設計の詳細化**
    - NginxログとOpenAppSecログのタグ設計を詳細化
-   - ホスト名、顧客名、FQDN名、日時情報を含むタグ構造を設計
-   - OpenAppSecログには検知シグニチャも含める
+   - シンプルなタグ構造（`{log_type}.{log_category}`のみ）を採用
+   - ホスト名、顧客名、FQDN名、日時情報はレコードに含める設計に変更
+   - OpenAppSecログには検知シグニチャもレコードに含める
 
 3. **FQDN別ログ処理の強化**
    - NginxログをFQDN別ディレクトリに出力

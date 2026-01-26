@@ -48,3 +48,10 @@ tmp/
 
 # Nginxリロードシグナルファイル（自動生成）
 docker/nginx/conf.d/.reload_signal
+
+# ログファイル（Nginx、OpenAppSec、Fluentd）
+# ディレクトリ全体を除外（ローテート後のファイルも含む）
+docker/nginx/logs/
+docker/openappsec/logs/
+docker/openappsec/logs-fqdn/
+docker/fluentd/log/
