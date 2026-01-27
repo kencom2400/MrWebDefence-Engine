@@ -51,7 +51,8 @@ generate_openappsec_policy() {
     specific_rules_json=$(echo "$config_data" | jq -r '.fqdns[]? | select(.is_active == true) | {
         host: .fqdn,
         mode: (.waf_mode // "detect-learn"),
-        customResponse: (.custom_response // 403)
+        customResponse: (.custom_response // 403),
+        accessControlPractice: (.access_control_practice // "rate-limit-default")
     }' 2>"$jq_error" | jq -s '.' 2>>"$jq_error")
     local jq_status=$?
     
@@ -67,10 +68,22 @@ generate_openappsec_policy() {
     trap - RETURN
     rm -f "$jq_error"
     
+    # accessControlPracticesの使用判定（rateLimit設定がある場合は使用）
+    local use_access_control="false"
+    if echo "$specific_rules_json" | jq -e '.[] | select(.accessControlPractice != null and .accessControlPractice != "")' >/dev/null 2>&1; then
+        use_access_control="true"
+    fi
+    
     # threatPreventionPracticesの使用判定（prevent/prevent-learnモードの場合は使用）
     local use_threat_prevention="false"
     if [[ "$default_mode" == "prevent"* ]] || echo "$specific_rules_json" | jq -e '.[] | select(.mode | startswith("prevent"))' >/dev/null 2>&1; then
         use_threat_prevention="true"
+    fi
+    
+    # accessControlPracticesの生成（rateLimit設定がある場合）
+    local default_access_control="[]"
+    if [ "$use_access_control" = "true" ]; then
+        default_access_control="[rate-limit-default]"
     fi
     
     # YAMLファイルを生成（公式ドキュメントのv1beta2スキーマに準拠）
@@ -81,7 +94,7 @@ policies:
   default:
     mode: ${default_mode}
     threatPreventionPractices: [threat-prevention-basic]
-    accessControlPractices: []
+    accessControlPractices: ${default_access_control}
     triggers: [log-trigger-basic]
     customResponse: ${default_custom_response}
     sourceIdentifiers: ""
@@ -93,7 +106,7 @@ $(echo "$specific_rules_json" | jq -r '.[] |
     "    - host: \"\(.host)\"\n" +
     "      mode: \(.mode)\n" +
     "      threatPreventionPractices: [threat-prevention-basic]\n" +
-    "      accessControlPractices: []\n" +
+    "      accessControlPractices: " + (if .accessControlPractice != null and .accessControlPractice != "" then "[" + (.accessControlPractice | split(",") | map(" \"" + (. | ltrimstr(" ") | rtrimstr(" ")) + "\"") | join(",")) + " ]" else "[]" end) + "\n" +
     "      triggers: [log-trigger-basic]\n" +
     "      customResponse: \(.customResponse)\n" +
     "      sourceIdentifiers: \"\"\n" +
@@ -143,6 +156,24 @@ threatPreventionPractices:
       injectedUris: []
       validatedUris: []
 
+# アクセス制御プラクティス定義
+accessControlPractices:
+  - name: rate-limit-default
+    practiceMode: inherited
+    rateLimit:
+      overrideMode: inherited
+      rules:
+        - uri: "/login"
+          limit: 10
+          unit: minute
+          action: prevent
+          comment: "ログイン試行のレート制限"
+        - uri: "/api/*"
+          limit: 100
+          unit: minute
+          action: detect
+          comment: "API呼び出しのレート制限"
+
 # ログトリガー定義
 logTriggers:
   - name: log-trigger-basic
@@ -176,7 +207,7 @@ policies:
   default:
     mode: ${default_mode}
     threatPreventionPractices: []
-    accessControlPractices: []
+    accessControlPractices: ${default_access_control}
     triggers: []
     customResponse: ${default_custom_response}
     sourceIdentifiers: ""
@@ -184,8 +215,45 @@ policies:
     exceptions: []
 
   specificRules:
-$(echo "$specific_rules_json" | jq -r '.[] | "    - host: \"\(.host)\"\n      mode: \(.mode)\n      threatPreventionPractices: []\n      accessControlPractices: []\n      triggers: []\n      customResponse: \(.customResponse)\n      sourceIdentifiers: \"\"\n      trustedSources: \"\"\n      exceptions: []"')
+$(echo "$specific_rules_json" | jq -r '.[] | 
+    "    - host: \"\(.host)\"\n" +
+    "      mode: \(.mode)\n" +
+    "      threatPreventionPractices: []\n" +
+    "      accessControlPractices: " + (if .accessControlPractice != null and .accessControlPractice != "" then "[" + (.accessControlPractice | split(",") | map(" \"" + (. | ltrimstr(" ") | rtrimstr(" ")) + "\"") | join(",")) + " ]" else "[]" end) + "\n" +
+    "      triggers: []\n" +
+    "      customResponse: \(.customResponse)\n" +
+    "      sourceIdentifiers: \"\"\n" +
+    "      trustedSources: \"\"\n" +
+    "      exceptions: []"')
 EOF
+    fi
+    
+    # accessControlPracticesが使用されている場合は定義を追加（use_threat_preventionがfalseの場合）
+    if [ "$use_access_control" = "true" ] && [ "$use_threat_prevention" = "false" ]; then
+        # 既存のYAMLファイルにaccessControlPractices定義を追加
+        if ! grep -q "^accessControlPractices:" "$output_file"; then
+            # ログトリガー定義の前に追加
+            sed -i '/^# ログトリガー定義/i\
+# アクセス制御プラクティス定義\
+accessControlPractices:\
+  - name: rate-limit-default\
+    practiceMode: inherited\
+    rateLimit:\
+      overrideMode: inherited\
+      rules:\
+        - uri: "/login"\
+          limit: 10\
+          unit: minute\
+          action: prevent\
+          comment: "ログイン試行のレート制限"\
+        - uri: "/api/*"\
+          limit: 100\
+          unit: minute\
+          action: detect\
+          comment: "API呼び出しのレート制限"\
+\
+' "$output_file"
+        fi
     fi
     
     # ファイル生成の確認

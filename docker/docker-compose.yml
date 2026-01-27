@@ -23,6 +23,7 @@ services:
       - "443:443"
     depends_on:
       - openappsec-agent
+      - redis
     networks:
       - mwd-network
     # IPC設定: 共有メモリ通信のため重要
@@ -171,6 +172,26 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  redis:
+    # Redis（RateLimit機能用）
+    image: redis:7-alpine
+    platform: linux/amd64
+    container_name: mwd-redis
+    volumes:
+      # Redisデータの永続化（オプション）
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - mwd-network
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   fluentd:
     # Fluentdログ収集・転送サービス
     # カスタムイメージを使用（必要なプラグインをインストール済み）
@@ -232,6 +253,9 @@ volumes:
       device: tmpfs
   # モックAPI設定ファイル用
   mock-api-config:
+    driver: local
+  # Redisデータの永続化
+  redis-data:
     driver: local
 
 networks:
