@@ -23,6 +23,7 @@ DEFAULT_CONFIG = {
             "is_active": True,
             "waf_mode": "detect-learn",
             "custom_response": 403,
+            "access_control_practice": "rate-limit-default",
             "backend_host": "httpbin.org",
             "backend_port": 80,
             "backend_path": "/get"
@@ -30,8 +31,9 @@ DEFAULT_CONFIG = {
         {
             "fqdn": "example1.com",
             "is_active": True,
-            "waf_mode": "detect-learn",
+            "waf_mode": "prevent-learn",
             "custom_response": 403,
+            "access_control_practice": "rate-limit-default",
             "backend_host": "httpbin.org",
             "backend_port": 80,
             "backend_path": "/json"
@@ -41,6 +43,7 @@ DEFAULT_CONFIG = {
             "is_active": True,
             "waf_mode": "detect-learn",
             "custom_response": 403,
+            "access_control_practice": "rate-limit-default",
             "backend_host": "httpbin.org",
             "backend_port": 80,
             "backend_path": "/xml"
@@ -48,8 +51,9 @@ DEFAULT_CONFIG = {
         {
             "fqdn": "example3.com",
             "is_active": True,
-            "waf_mode": "detect-learn",
+            "waf_mode": "prevent-learn",
             "custom_response": 403,
+            "access_control_practice": "rate-limit-default",
             "backend_host": "httpbin.org",
             "backend_port": 80,
             "backend_path": "/get"
