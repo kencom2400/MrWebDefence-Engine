@@ -6,92 +6,34 @@ policies:
     accessControlPractices: [rate-limit-default]
     triggers: [log-trigger-basic]
     customResponse: "403"
-    sourceIdentifiers: ""
-    trustedSources: ""
-    exceptions: []
 
   specificRules:
     - host: "test.example.com"
       mode: "detect-learn"
       threatPreventionPractices: [threat-prevention-basic]
-      accessControlPractices: [ "rate-limit-default" ]
+      accessControlPractices: [rate-limit-default]
       triggers: [log-trigger-basic]
       customResponse: 403
-      sourceIdentifiers: ""
-      trustedSources: ""
-      exceptions: []
-    - host: "example1.com"
-      mode: "prevent-learn"
-      threatPreventionPractices: [threat-prevention-basic]
-      accessControlPractices: [ "rate-limit-default" ]
-      triggers: [log-trigger-basic]
-      customResponse: 403
-      sourceIdentifiers: ""
-      trustedSources: ""
-      exceptions: []
-    - host: "example2.com"
-      mode: "detect-learn"
-      threatPreventionPractices: [threat-prevention-basic]
-      accessControlPractices: [ "rate-limit-default" ]
-      triggers: [log-trigger-basic]
-      customResponse: 403
-      sourceIdentifiers: ""
-      trustedSources: ""
-      exceptions: []
-    - host: "example3.com"
-      mode: "prevent-learn"
-      threatPreventionPractices: [threat-prevention-basic]
-      accessControlPractices: [ "rate-limit-default" ]
-      triggers: [log-trigger-basic]
-      customResponse: 403
-      sourceIdentifiers: ""
-      trustedSources: ""
-      exceptions: []
 
-# 脅威防止プラクティス定義
 threatPreventionPractices:
   - name: threat-prevention-basic
     practiceMode: prevent
     webAttacks:
       overrideMode: prevent
       minimumConfidence: medium
-      maxUrlSizeBytes: 32768
-      maxObjectDepth: 40
-      maxBodySizeKb: 10000
-      maxHeaderSizeBytes: 102400
-      protections:
-        csrfProtection: prevent
-        errorDisclosure: prevent
-        openRedirect: prevent
-        nonValidHttpMethods: true
-    intrusionPrevention:
-      overrideMode: inherited
-      maxPerformanceImpact: medium
-      minSeverityLevel: medium
-      minCveYear: 2016
-      highConfidenceEventAction: prevent
-      mediumConfidenceEventAction: prevent
-      lowConfidenceEventAction: detect
-    fileSecurity:
-      overrideMode: inherited
-      minSeverityLevel: medium
-      highConfidenceEventAction: prevent
-      mediumConfidenceEventAction: prevent
-      lowConfidenceEventAction: detect
-    snortSignatures:
-      overrideMode: inherited
-      configmap: []
-      files: []
-    schemaValidation:
-      overrideMode: inherited
-      configmap: []
-      files: []
-    antiBot:
-      overrideMode: inherited
-      injectedUris: []
-      validatedUris: []
 
-# ログトリガー定義
+accessControlPractices:
+  - name: rate-limit-default
+    practiceMode: prevent
+    rateLimit:
+      overrideMode: prevent
+      rules:
+        - uri: "/login"
+          limit: 10
+          unit: minute
+          action: prevent
+          comment: "ログイン試行のレート制限"
+
 logTriggers:
   - name: log-trigger-basic
     accessControlLogging:
@@ -104,33 +46,12 @@ logTriggers:
     extendedLogging:
       urlPath: true
       urlQuery: true
-      httpHeaders: false
-      requestBody: false
     additionalSuspiciousEventsLogging:
       enabled: true
       minSeverity: high
-      responseBody: false
       responseCode: true
     logDestination:
       cloud: false
       logToAgent: true
       stdout:
         format: json
-
-# アクセス制御プラクティス定義
-accessControlPractices:
-  - name: rate-limit-default
-    practiceMode: inherited
-    rateLimit:
-      overrideMode: inherited
-      rules:
-        - uri: "/login"
-          limit: 10
-          unit: minute
-          action: prevent
-          comment: "ログイン試行のレート制限"
-        - uri: "/api/*"
-          limit: 100
-          unit: minute
-          action: detect
-          comment: "API呼び出しのレート制限"

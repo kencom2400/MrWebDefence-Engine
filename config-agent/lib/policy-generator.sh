@@ -151,9 +151,9 @@ generate_openappsec_policy() {
 # アクセス制御プラクティス定義
 accessControlPractices:
   - name: rate-limit-default
-    practiceMode: inherited
+    practiceMode: prevent
     rateLimit:
-      overrideMode: inherited
+      overrideMode: prevent
       rules:
         - uri: "/login"
           limit: 10
@@ -163,7 +163,7 @@ accessControlPractices:
         - uri: "/api/*"
           limit: 100
           unit: minute
-          action: detect
+          action: prevent
           comment: "API呼び出しのレート制限"
 ACCESS_CONTROL_EOF
         fi
