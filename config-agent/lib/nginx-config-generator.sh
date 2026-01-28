@@ -110,12 +110,10 @@ generate_nginx_configs() {
         fi
         
         # バックエンドURLを構築
+        # 注意: RateLimit機能をテストするため、パスを保持する必要がある
+        # proxy_passの末尾にパスを含めないことで、リクエストパスが保持される
         local backend_url
-        if [ -n "$backend_path" ]; then
-            backend_url="http://${backend_host}:${backend_port}${backend_path}"
-        else
-            backend_url="http://${backend_host}:${backend_port}"
-        fi
+        backend_url="http://${backend_host}:${backend_port}"
         
         local config_file="${output_dir}/${fqdn}.conf"
         
