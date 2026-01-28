@@ -12246,6 +12246,100 @@ redis:
 **参照**: PR #45 - Task 5.4: RateLimit機能実装（Gemini Code Assistレビュー指摘）
 
 ---
+
+### 24-5. Redis認証の必須化（本番環境） 🟡 Medium
+
+**問題**: Redisサービスに必須の認証が欠けている。環境変数が設定されていない場合でも警告を出すだけで、認証なしで起動してしまう
+
+**解決策**: 本番環境では認証を必須にする
+
+```yaml
+# ❌ 悪い例: 認証なしでも起動してしまう
+command: >
+  sh -c "
+  if [ -n \"$$REDIS_PASSWORD\" ]; then
+    redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\"
+  else
+    echo '⚠️  警告: REDIS_PASSWORDが設定されていません。' >&2
+    redis-server --appendonly yes
+  fi
+  "
+
+# ✅ 良い例: 本番環境では認証を必須にする
+command: >
+  sh -c "
+  if [ -n \"$$REDIS_PASSWORD\" ]; then
+    redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\"
+  else
+    if [ \"$$ENVIRONMENT\" = \"production\" ] || [ \"$$ENV\" = \"production\" ]; then
+      echo '❌ エラー: 本番環境ではREDIS_PASSWORDが必須です。' >&2
+      exit 1
+    else
+      echo '⚠️  警告: REDIS_PASSWORDが設定されていません。本番環境では必ず設定してください。' >&2
+      redis-server --appendonly yes
+    fi
+  fi
+  "
+environment:
+  - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+  - ENVIRONMENT=${ENVIRONMENT:-development}
+  - ENV=${ENV:-development}
+```
+
+**理由**:
+- 本番環境では認証なしでRedisを起動すると、セキュリティリスクが高まる
+- 環境変数で本番環境を判定し、認証を必須にする
+- 開発環境では警告を出すだけで起動可能（開発の利便性を考慮）
+
+**参照**: PR #45 - Task 5.4: RateLimit機能実装（Gemini Code Assistレビュー指摘）
+
+---
+
+### 24-6. JSONフィールド欠落時のエラーハンドリング強化 🟡 Medium
+
+**問題**: ポリシー生成スクリプトが特定の入力JSONフィールドが欠けている場合に失敗する可能性がある
+
+**解決策**: 必須フィールドの検証を追加し、欠落している場合のエラーハンドリングを強化する
+
+```bash
+# ❌ 悪い例: 必須フィールドの検証がない
+specific_rules_json=$(echo "$config_data" | jq -r '.fqdns[]? | select(.is_active == true) | {
+    host: .fqdn,
+    mode: (.waf_mode // "detect-learn"),
+    ...
+}')
+
+# ✅ 良い例: 必須フィールドの検証を追加
+# 必須フィールドの検証: .fqdnは必須、欠落している場合はエラー
+local fqdns_check
+fqdns_check=$(echo "$config_data" | jq -r '.fqdns[]? | select(.is_active == true) | if .fqdn == null or .fqdn == "" then "ERROR: fqdn is required" else empty end' 2>/dev/null)
+if [ -n "$fqdns_check" ]; then
+    echo "❌ エラー: FQDN設定に必須フィールド（fqdn）が欠落しています" >&2
+    echo "❌ エラー詳細: $fqdns_check" >&2
+    return 1
+fi
+
+specific_rules_json=$(echo "$config_data" | jq -r '.fqdns[]? | select(.is_active == true) | {
+    host: .fqdn,
+    mode: (.waf_mode // "detect-learn"),
+    ...
+}')
+
+# 生成されたJSONが空でないことを確認
+if [ -z "$specific_rules_json" ] || [ "$specific_rules_json" = "[]" ]; then
+    echo "⚠️  警告: 有効なFQDN設定がありません（空の配列）" >&2
+    # 空の配列でも処理は続行（デフォルト設定のみが適用される）
+fi
+```
+
+**理由**:
+- 必須フィールドが欠落している場合、後続の処理で予期しないエラーが発生する可能性がある
+- 事前に必須フィールドを検証することで、エラーメッセージが明確になる
+- 空の配列の場合でも処理を続行することで、デフォルト設定が適用される
+
+**参照**: PR #45 - Task 5.4: RateLimit機能実装（Gemini Code Assistレビュー指摘）
+
+---
 - `rewrite_tag_filter`は、`record_transformer`で追加されたフィールドを参照できる
 - 2段階のフィルタリングにより、正しいタグを生成できる
 
