@@ -12007,6 +12007,339 @@ fi
 **理由**:
 - `record_transformer`の`record`は元のイベントレコードを指す
 - 同じ`<record>`ブロック内で定義した新しいフィールドは、そのブロック内の`tag`ディレクティブでは参照できない
+
+---
+
+## 24. Gemini Code Assist レビューから学んだ観点（PR #45 Task 5.4 RateLimit機能実装）
+
+**学習元**: PR #45 - Task 5.4: RateLimit機能実装（Gemini Code Assistレビュー指摘）
+
+### 24-1. YAML Injection脆弱性の防止 🔴 Critical
+
+**問題**: API提供データを直接YAMLに埋め込むことで、YAML Injection脆弱性が発生する可能性がある
+
+**解決策**: `jq`の`@json`フィルターを使用して、API提供データを安全にエスケープする
+
+```bash
+# ❌ 悪い例: 直接変数をYAMLに埋め込む（YAML Injection脆弱性）
+cat > "$output_file" << EOF
+apiVersion: v1beta2
+policies:
+  default:
+    mode: ${default_mode}
+    customResponse: ${default_custom_response}
+EOF
+
+# ✅ 良い例: jqの@jsonを使用して安全にエスケープ
+cat > "$output_file" << EOF
+apiVersion: v1beta2
+policies:
+  default:
+    mode: $(echo "$default_mode" | jq -R .)
+    customResponse: $(echo "$default_custom_response" | jq -R .)
+EOF
+```
+
+**追加の検証**:
+- 入力値の検証を追加（許可された値のみを受け入れる）
+- 例: `default_mode`が許可された値（`detect-learn`, `prevent-learn`, `detect`, `prevent`, `inactive`）であることを確認
+
+```bash
+# ✅ 良い例: 入力値の検証を追加
+if ! echo "$default_mode" | grep -qE '^(detect-learn|prevent-learn|detect|prevent|inactive)$'; then
+    echo "❌ エラー: 無効なdefault_mode: $default_mode" >&2
+    return 1
+fi
+```
+
+**重要な注意点**: すべてのAPI提供データに対して`@json`を使用する
+- `default_mode`や`default_custom_response`だけでなく、`specificRules`内のすべてのフィールドにも`@json`を使用する
+- 特に`customResponse`フィールドは`tostring`ではなく`@json`を使用する必要がある
+
+```bash
+# ❌ 悪い例: tostringを使用（YAML Injection脆弱性）
+"      customResponse: " + (.customResponse | tostring) + "\n"
+
+# ✅ 良い例: @jsonを使用（安全）
+"      customResponse: " + (.customResponse | @json) + "\n"
+```
+
+**理由**:
+- API提供データに悪意のあるYAML構文が含まれている場合、WAFポリシーの操作が可能になる
+- `jq`の`@json`フィルターを使用することで、特殊文字が適切にエスケープされる
+- 入力値の検証を追加することで、許可された値のみを受け入れることができる
+- **すべてのAPI提供データに対して`@json`を使用することで、YAML Injection脆弱性を完全に防ぐことができる**
+
+**参照**: PR #45 - Task 5.4: RateLimit機能実装（Gemini Code Assistレビュー指摘）
+
+---
+
+### 24-2. コード重複の排除と保守性の向上 🟡 Medium
+
+**問題**: `use_threat_prevention`がtrue/falseの場合で同じようなYAML生成コードが重複している
+
+**解決策**: 共通部分を関数化して、コード重複を排除する
+
+```bash
+# ❌ 悪い例: コード重複
+if [ "$use_threat_prevention" = "true" ]; then
+    cat > "$output_file" << EOF
+  specificRules:
+$(echo "$specific_rules_json" | jq -r '.[] | 
+    "    - host: \"\(.host)\"\n" +
+    "      mode: \(.mode)\n" +
+    "      threatPreventionPractices: [threat-prevention-basic]\n" +
+    "      accessControlPractices: " + ... + "\n" +
+    "      triggers: [log-trigger-basic]\n" +
+    ...')
+EOF
+else
+    cat > "$output_file" << EOF
+  specificRules:
+$(echo "$specific_rules_json" | jq -r '.[] | 
+    "    - host: \"\(.host)\"\n" +
+    "      mode: \(.mode)\n" +
+    "      threatPreventionPractices: []\n" +
+    "      accessControlPractices: " + ... + "\n" +
+    "      triggers: []\n" +
+    ...')
+EOF
+fi
+
+# ✅ 良い例: 共通部分を関数化
+generate_specific_rules_yaml() {
+    local threat_practices="$1"
+    local access_control_practices="$2"
+    local triggers="$3"
+    
+    echo "$specific_rules_json" | jq -r --arg threat_practices "$threat_practices" \
+        --arg access_control_practices "$access_control_practices" \
+        --arg triggers "$triggers" '.[] | 
+        "    - host: " + (.host | @json) + "\n" +
+        "      mode: " + (.mode | @json) + "\n" +
+        "      threatPreventionPractices: " + $threat_practices + "\n" +
+        "      accessControlPractices: " + ... + "\n" +
+        "      triggers: " + $triggers + "\n" +
+        ...'
+}
+
+if [ "$use_threat_prevention" = "true" ]; then
+    cat > "$output_file" << EOF
+  specificRules:
+$(generate_specific_rules_yaml "[threat-prevention-basic]" "$default_access_control" "[log-trigger-basic]")
+EOF
+else
+    cat > "$output_file" << EOF
+  specificRules:
+$(generate_specific_rules_yaml "[]" "$default_access_control" "[]")
+EOF
+fi
+```
+
+**理由**:
+- コード重複を排除することで、保守性が向上する
+- ロジックの変更時に1箇所の修正で済む
+- テストが容易になる
+
+**参照**: PR #45 - Task 5.4: RateLimit機能実装（Gemini Code Assistレビュー指摘）
+
+---
+
+### 24-3. 重大なバグの修正: YAML生成時の定義追加 🔴 Critical
+
+**問題**: `use_threat_prevention`がfalseの場合、`accessControlPractices`定義が`sed`で追加されるが、これは脆弱でエラーが発生しやすい
+
+**解決策**: YAML生成時に`accessControlPractices`定義を含める（`sed`を使わない）
+
+```bash
+# ❌ 悪い例: sedで後から追加（脆弱でエラーが発生しやすい）
+if [ "$use_threat_prevention" = "true" ]; then
+    cat > "$output_file" << EOF
+# accessControlPractices定義が含まれている
+EOF
+else
+    cat > "$output_file" << EOF
+# accessControlPractices定義が含まれていない
+EOF
+    # sedで後から追加（脆弱）
+    if [ "$use_access_control" = "true" ]; then
+        sed -i '/^# ログトリガー定義/i\...' "$output_file"
+    fi
+fi
+
+# ✅ 良い例: YAML生成時に含める
+generate_access_control_practices_yaml() {
+    if [ "$use_access_control" = "true" ]; then
+        cat << 'ACCESS_CONTROL_EOF'
+
+# アクセス制御プラクティス定義
+accessControlPractices:
+  - name: rate-limit-default
+    ...
+ACCESS_CONTROL_EOF
+    fi
+}
+
+if [ "$use_threat_prevention" = "true" ]; then
+    cat > "$output_file" << EOF
+...
+$(generate_access_control_practices_yaml)
+EOF
+else
+    cat > "$output_file" << EOF
+...
+$(generate_access_control_practices_yaml)
+EOF
+fi
+```
+
+**理由**:
+- `sed`を使った後からの追加は、YAML構文エラーが発生しやすい
+- YAML生成時に含めることで、構文エラーを防ぐことができる
+- コードがより明確で理解しやすくなる
+
+**参照**: PR #45 - Task 5.4: RateLimit機能実装（Gemini Code Assistレビュー指摘）
+
+---
+
+### 24-4. Redis設定のセキュリティ強化 🔴 Critical
+
+**問題**: Redisコンテナが認証なしでホストに公開されている
+
+**解決策**: 
+1. ホストへの公開を削除し、内部ネットワークのみでアクセス可能にする
+2. 認証を追加（環境変数から取得）
+
+```yaml
+# ❌ 悪い例: 認証なしでホストに公開
+redis:
+  ports:
+    - "6379:6379"
+  command: redis-server --appendonly yes
+
+# ✅ 良い例: 内部ネットワークのみ、認証を追加
+redis:
+  # ホストへの公開を削除（内部ネットワークのみ）
+  # ports:
+  #   - "6379:6379"
+  networks:
+    - mwd-network
+  # 認証を追加（環境変数から取得）
+  command: >
+    sh -c "
+    if [ -n \"$$REDIS_PASSWORD\" ]; then
+      redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\"
+    else
+      echo '⚠️  警告: REDIS_PASSWORDが設定されていません。本番環境では必ず設定してください。' >&2
+      redis-server --appendonly yes
+    fi
+    "
+  environment:
+    - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+```
+
+**理由**:
+- 認証なしでホストに公開すると、不正アクセスのリスクがある
+- 内部ネットワークのみでアクセス可能にすることで、セキュリティが向上する
+- 本番環境では必ず認証を設定する必要がある
+
+**参照**: PR #45 - Task 5.4: RateLimit機能実装（Gemini Code Assistレビュー指摘）
+
+---
+
+### 24-5. Redis認証の必須化（本番環境） 🟡 Medium
+
+**問題**: Redisサービスに必須の認証が欠けている。環境変数が設定されていない場合でも警告を出すだけで、認証なしで起動してしまう
+
+**解決策**: 本番環境では認証を必須にする
+
+```yaml
+# ❌ 悪い例: 認証なしでも起動してしまう
+command: >
+  sh -c "
+  if [ -n \"$$REDIS_PASSWORD\" ]; then
+    redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\"
+  else
+    echo '⚠️  警告: REDIS_PASSWORDが設定されていません。' >&2
+    redis-server --appendonly yes
+  fi
+  "
+
+# ✅ 良い例: 本番環境では認証を必須にする
+command: >
+  sh -c "
+  if [ -n \"$$REDIS_PASSWORD\" ]; then
+    redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\"
+  else
+    if [ \"$$ENVIRONMENT\" = \"production\" ] || [ \"$$ENV\" = \"production\" ]; then
+      echo '❌ エラー: 本番環境ではREDIS_PASSWORDが必須です。' >&2
+      exit 1
+    else
+      echo '⚠️  警告: REDIS_PASSWORDが設定されていません。本番環境では必ず設定してください。' >&2
+      redis-server --appendonly yes
+    fi
+  fi
+  "
+environment:
+  - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+  - ENVIRONMENT=${ENVIRONMENT:-development}
+  - ENV=${ENV:-development}
+```
+
+**理由**:
+- 本番環境では認証なしでRedisを起動すると、セキュリティリスクが高まる
+- 環境変数で本番環境を判定し、認証を必須にする
+- 開発環境では警告を出すだけで起動可能（開発の利便性を考慮）
+
+**参照**: PR #45 - Task 5.4: RateLimit機能実装（Gemini Code Assistレビュー指摘）
+
+---
+
+### 24-6. JSONフィールド欠落時のエラーハンドリング強化 🟡 Medium
+
+**問題**: ポリシー生成スクリプトが特定の入力JSONフィールドが欠けている場合に失敗する可能性がある
+
+**解決策**: 必須フィールドの検証を追加し、欠落している場合のエラーハンドリングを強化する
+
+```bash
+# ❌ 悪い例: 必須フィールドの検証がない
+specific_rules_json=$(echo "$config_data" | jq -r '.fqdns[]? | select(.is_active == true) | {
+    host: .fqdn,
+    mode: (.waf_mode // "detect-learn"),
+    ...
+}')
+
+# ✅ 良い例: 必須フィールドの検証を追加
+# 必須フィールドの検証: .fqdnは必須、欠落している場合はエラー
+local fqdns_check
+fqdns_check=$(echo "$config_data" | jq -r '.fqdns[]? | select(.is_active == true) | if .fqdn == null or .fqdn == "" then "ERROR: fqdn is required" else empty end' 2>/dev/null)
+if [ -n "$fqdns_check" ]; then
+    echo "❌ エラー: FQDN設定に必須フィールド（fqdn）が欠落しています" >&2
+    echo "❌ エラー詳細: $fqdns_check" >&2
+    return 1
+fi
+
+specific_rules_json=$(echo "$config_data" | jq -r '.fqdns[]? | select(.is_active == true) | {
+    host: .fqdn,
+    mode: (.waf_mode // "detect-learn"),
+    ...
+}')
+
+# 生成されたJSONが空でないことを確認
+if [ -z "$specific_rules_json" ] || [ "$specific_rules_json" = "[]" ]; then
+    echo "⚠️  警告: 有効なFQDN設定がありません（空の配列）" >&2
+    # 空の配列でも処理は続行（デフォルト設定のみが適用される）
+fi
+```
+
+**理由**:
+- 必須フィールドが欠落している場合、後続の処理で予期しないエラーが発生する可能性がある
+- 事前に必須フィールドを検証することで、エラーメッセージが明確になる
+- 空の配列の場合でも処理を続行することで、デフォルト設定が適用される
+
+**参照**: PR #45 - Task 5.4: RateLimit機能実装（Gemini Code Assistレビュー指摘）
+
+---
 - `rewrite_tag_filter`は、`record_transformer`で追加されたフィールドを参照できる
 - 2段階のフィルタリングにより、正しいタグを生成できる
 

@@ -23,6 +23,7 @@ services:
       - "443:443"
     depends_on:
       - openappsec-agent
+      - redis
     networks:
       - mwd-network
     # IPC設定: 共有メモリ通信のため重要
@@ -171,6 +172,50 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  redis:
+    # Redis（RateLimit機能用）
+    # 注意: 現在はOpenAppSecのRateLimit機能を使用するため、Redisは将来の拡張用
+    # セキュリティ: 内部ネットワークのみでアクセス可能（ホストには公開しない）
+    image: redis:7-alpine
+    platform: linux/amd64
+    container_name: mwd-redis
+    volumes:
+      # Redisデータの永続化（オプション）
+      - redis-data:/data
+    # セキュリティ強化: ホストへの公開を削除し、内部ネットワークのみでアクセス可能に
+    # 開発環境でデバッグが必要な場合は、環境変数で制御可能
+    # ports:
+    #   - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - mwd-network
+    # セキュリティ強化: 認証を追加（環境変数から取得）
+    # 本番環境では必ず認証を設定すること
+    # 開発環境では認証なしでも起動可能だが、警告を表示
+    command: >
+      sh -c "
+      if [ -n \"$$REDIS_PASSWORD\" ]; then
+        redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\"
+      else
+        if [ \"$$ENVIRONMENT\" = \"production\" ] || [ \"$$ENV\" = \"production\" ]; then
+          echo '❌ エラー: 本番環境ではREDIS_PASSWORDが必須です。' >&2
+          exit 1
+        else
+          echo '⚠️  警告: REDIS_PASSWORDが設定されていません。本番環境では必ず設定してください。' >&2
+          redis-server --appendonly yes
+        fi
+      fi
+      "
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - ENV=${ENV:-development}
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   fluentd:
     # Fluentdログ収集・転送サービス
     # カスタムイメージを使用（必要なプラグインをインストール済み）
@@ -232,6 +277,9 @@ volumes:
       device: tmpfs
   # モックAPI設定ファイル用
   mock-api-config:
+    driver: local
+  # Redisデータの永続化
+  redis-data:
     driver: local
 
 networks:
