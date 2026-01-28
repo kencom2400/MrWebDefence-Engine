@@ -190,17 +190,25 @@ services:
       - mwd-network
     # セキュリティ強化: 認証を追加（環境変数から取得）
     # 本番環境では必ず認証を設定すること
+    # 開発環境では認証なしでも起動可能だが、警告を表示
     command: >
       sh -c "
       if [ -n \"$$REDIS_PASSWORD\" ]; then
         redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\"
       else
-        echo '⚠️  警告: REDIS_PASSWORDが設定されていません。本番環境では必ず設定してください。' >&2
-        redis-server --appendonly yes
+        if [ \"$$ENVIRONMENT\" = \"production\" ] || [ \"$$ENV\" = \"production\" ]; then
+          echo '❌ エラー: 本番環境ではREDIS_PASSWORDが必須です。' >&2
+          exit 1
+        else
+          echo '⚠️  警告: REDIS_PASSWORDが設定されていません。本番環境では必ず設定してください。' >&2
+          redis-server --appendonly yes
+        fi
       fi
       "
     environment:
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - ENV=${ENV:-development}
     restart: unless-stopped
     logging:
       driver: "json-file"

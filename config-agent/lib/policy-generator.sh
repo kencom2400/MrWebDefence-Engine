@@ -56,6 +56,15 @@ generate_openappsec_policy() {
     fi
     
     # FQDN別設定（specificRules）を生成
+    # 必須フィールドの検証: .fqdnは必須、欠落している場合はエラー
+    local fqdns_check
+    fqdns_check=$(echo "$config_data" | jq -r '.fqdns[]? | select(.is_active == true) | if .fqdn == null or .fqdn == "" then "ERROR: fqdn is required" else empty end' 2>/dev/null)
+    if [ -n "$fqdns_check" ]; then
+        echo "❌ エラー: FQDN設定に必須フィールド（fqdn）が欠落しています" >&2
+        echo "❌ エラー詳細: $fqdns_check" >&2
+        return 1
+    fi
+    
     local specific_rules_json
     local jq_error
     jq_error=$(mktemp)
@@ -77,6 +86,13 @@ generate_openappsec_policy() {
         rm -f "$jq_error"
         return 1
     fi
+    
+    # 生成されたJSONが空でないことを確認
+    if [ -z "$specific_rules_json" ] || [ "$specific_rules_json" = "[]" ]; then
+        echo "⚠️  警告: 有効なFQDN設定がありません（空の配列）" >&2
+        # 空の配列でも処理は続行（デフォルト設定のみが適用される）
+    fi
+    
     trap - RETURN
     rm -f "$jq_error"
     
