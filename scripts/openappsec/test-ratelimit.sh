@@ -33,13 +33,13 @@ else
     DOCKER_COMPOSE_CMD="docker compose"
 fi
 
-# Redisコンテナの確認
+# Redisコンテナの確認（オプション: 将来の拡張用）
 if $DOCKER_COMPOSE_CMD ps redis 2>/dev/null | grep -q "Up"; then
     echo -e "${GREEN}✅ Redis: 起動中${NC}"
 else
-    echo -e "${RED}❌ Redis: 停止中${NC}"
-    echo "   起動してください: $DOCKER_COMPOSE_CMD up -d redis"
-    exit 1
+    echo -e "${YELLOW}⚠️  Redis: 停止中（オプション）${NC}"
+    echo "   注意: OpenAppSecのRateLimit機能は共有メモリを使用するため、Redisは必須ではありません"
+    echo "   Redisは将来の拡張用に準備されています"
 fi
 
 # Nginx
