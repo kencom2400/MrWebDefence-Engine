@@ -149,22 +149,19 @@ generate_openappsec_policy() {
             cat << 'ACCESS_CONTROL_EOF'
 
 # アクセス制御プラクティス定義
+# 注意: OpenAppSec Community Editionでは1つのルールのみサポートされています
+# 複数のルールを定義しても、最初の1つだけが有効になります
 accessControlPractices:
   - name: rate-limit-default
     practiceMode: prevent
     rateLimit:
       overrideMode: prevent
       rules:
-        - uri: "/login"
-          limit: 10
-          unit: minute
-          action: prevent
-          comment: "ログイン試行のレート制限"
-        - uri: "/api/*"
+        - uri: "/"
           limit: 100
           unit: minute
           action: prevent
-          comment: "API呼び出しのレート制限"
+          comment: "全エンドポイントのレート制限（Community Edition制限により1ルールのみ。元々は/login:10/分、/api/*:100/分を想定していたが、統合して100/分に設定）"
 ACCESS_CONTROL_EOF
         fi
     }

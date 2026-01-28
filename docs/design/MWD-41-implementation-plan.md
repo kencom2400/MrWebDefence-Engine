@@ -92,21 +92,18 @@ OpenAppSecの`local_policy.yaml`に`accessControlPractices`を追加します。
 ```yaml
 accessControlPractices:
   - name: rate-limit-default
-    practiceMode: inherited
+    practiceMode: prevent
     rateLimit:
-      overrideMode: inherited
+      overrideMode: prevent
       rules:
-        - uri: "/login"
-          limit: 10
-          unit: minute
-          action: prevent
-          comment: "ログイン試行のレート制限"
-        - uri: "/api/*"
+        - uri: "/"
           limit: 100
           unit: minute
-          action: detect
-          comment: "API呼び出しのレート制限"
+          action: prevent
+          comment: "全エンドポイントのレート制限（Community Edition制限により1ルールのみ）"
 ```
+
+**注意**: OpenAppSec Community Editionでは、**1つのルールのみサポートされています**。複数のルールを定義しても、最初の1つだけが有効になります。そのため、全エンドポイント（`uri: "/"`）に適用する1つのルールに統合しています。
 
 #### 1.2 RateLimitルールの設定項目
 
