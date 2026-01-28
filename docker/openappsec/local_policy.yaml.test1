@@ -1,0 +1,58 @@
+apiVersion: v1beta2
+
+policies:
+  default:
+    mode: detect-learn
+    accessControlPractices: [rate-limit-default]
+    threatPreventionPractices: [threat-prevention-basic]
+    triggers: [log-trigger-basic]
+    customResponse: "403"
+
+  specificRules:
+    - host: "test.example.com"
+      mode: detect-learn
+      threatPreventionPractices: [threat-prevention-basic]
+      accessControlPractices: [rate-limit-default]
+      triggers: [log-trigger-basic]
+      customResponse: 403
+
+threatPreventionPractices:
+  - name: threat-prevention-basic
+    practiceMode: prevent
+    webAttacks:
+      overrideMode: prevent
+      minimumConfidence: medium
+
+accessControlPractices:
+  - name: rate-limit-default
+    practiceMode: inherited
+    rateLimit:
+      overrideMode: inherited
+      rules:
+        - uri: "/"
+          limit: 100
+          unit: minute
+          action: prevent
+          comment: "全エンドポイントのレート制限（Community Edition制限により1ルールのみ）"
+
+logTriggers:
+  - name: log-trigger-basic
+    accessControlLogging:
+      allowEvents: false
+      dropEvents: true
+    appsecLogging:
+      detectEvents: true
+      preventEvents: true
+      allWebRequests: false
+    extendedLogging:
+      urlPath: true
+      urlQuery: true
+    additionalSuspiciousEventsLogging:
+      enabled: true
+      minSeverity: high
+      responseCode: true
+    logDestination:
+      cloud: false
+      logToAgent: true
+      stdout:
+        format: json
