@@ -92,21 +92,18 @@ OpenAppSecの`local_policy.yaml`に`accessControlPractices`を追加します。
 ```yaml
 accessControlPractices:
   - name: rate-limit-default
-    practiceMode: inherited
+    practiceMode: prevent
     rateLimit:
-      overrideMode: inherited
+      overrideMode: prevent
       rules:
-        - uri: "/login"
-          limit: 10
-          unit: minute
-          action: prevent
-          comment: "ログイン試行のレート制限"
-        - uri: "/api/*"
+        - uri: "/"
           limit: 100
           unit: minute
-          action: detect
-          comment: "API呼び出しのレート制限"
+          action: prevent
+          comment: "全エンドポイントのレート制限（Community Edition制限により1ルールのみ）"
 ```
+
+**注意**: OpenAppSec Community Editionでは、**1つのルールのみサポートされています**。複数のルールを定義しても、最初の1つだけが有効になります。そのため、全エンドポイント（`uri: "/"`）に適用する1つのルールに統合しています。
 
 #### 1.2 RateLimitルールの設定項目
 
@@ -369,15 +366,15 @@ NginxコンテナがRedisコンテナに依存するように設定します（�
 **成果物**:
 - 更新された`docker-compose.yml`
 
-### Phase 3: テストと動作確認（未実施）
+### Phase 3: テストと動作確認（実施中）
 
 #### 3.1 基本動作確認
 
 **テスト項目**:
-- [ ] `accessControlPractices`が正しく生成される
-- [ ] `rate-limit-default`プラクティスが正しく定義される
-- [ ] Redisコンテナが正常に起動する
-- [ ] OpenAppSec AgentがRateLimit設定を正しく読み込む
+- [x] `accessControlPractices`が正しく生成される
+- [x] `rate-limit-default`プラクティスが正しく定義される
+- [ ] Redisコンテナが正常に起動する（オプション、将来の拡張用）
+- [x] OpenAppSec AgentがRateLimit設定を正しく読み込む
 
 **テスト手順**:
 1. Docker Composeでサービスを起動
@@ -416,12 +413,12 @@ NginxコンテナがRedisコンテナに依存するように設定します（�
 
 - [x] `accessControlPractices`が正しく生成される
 - [x] `rate-limit-default`プラクティスが正しく定義される
-- [x] Redisコンテナが正常に起動する
-- [ ] OpenAppSec AgentがRateLimit設定を正しく読み込む
-- [ ] `/login`エンドポイントへのレート制限が正常に動作する
-- [ ] `/api/*`エンドポイントへのレート制限が正常に動作する
-- [ ] 制限超過時に正しいレスポンスが返される
-- [ ] IPアドレス単位でレート制限が適用される
+- [ ] Redisコンテナが正常に起動する（オプション、将来の拡張用）
+- [x] OpenAppSec AgentがRateLimit設定を正しく読み込む
+- [ ] `/login`エンドポイントへのレート制限が正常に動作する（確認中）
+- [ ] `/api/*`エンドポイントへのレート制限が正常に動作する（確認中）
+- [ ] 制限超過時に正しいレスポンスが返される（確認中）
+- [ ] IPアドレス単位でレート制限が適用される（確認中）
 
 ### オプション条件
 
