@@ -114,7 +114,7 @@ generate_openappsec_policy() {
                 "[" + (.accessControlPractice | split(",") | map(" " + (. | ltrimstr(" ") | rtrimstr(" ") | @json)) | join(",")) + " ]" 
             else "[]" end) + "\n" +
             "      triggers: " + $triggers + "\n" +
-            "      customResponse: " + (.customResponse | tostring) + "\n" +
+            "      customResponse: " + (.customResponse | @json) + "\n" +
             "      sourceIdentifiers: \"\"\n" +
             "      trustedSources: \"\"\n" +
             "      exceptions: []"'

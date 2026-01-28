@@ -12052,10 +12052,23 @@ if ! echo "$default_mode" | grep -qE '^(detect-learn|prevent-learn|detect|preven
 fi
 ```
 
+**重要な注意点**: すべてのAPI提供データに対して`@json`を使用する
+- `default_mode`や`default_custom_response`だけでなく、`specificRules`内のすべてのフィールドにも`@json`を使用する
+- 特に`customResponse`フィールドは`tostring`ではなく`@json`を使用する必要がある
+
+```bash
+# ❌ 悪い例: tostringを使用（YAML Injection脆弱性）
+"      customResponse: " + (.customResponse | tostring) + "\n"
+
+# ✅ 良い例: @jsonを使用（安全）
+"      customResponse: " + (.customResponse | @json) + "\n"
+```
+
 **理由**:
 - API提供データに悪意のあるYAML構文が含まれている場合、WAFポリシーの操作が可能になる
 - `jq`の`@json`フィルターを使用することで、特殊文字が適切にエスケープされる
 - 入力値の検証を追加することで、許可された値のみを受け入れることができる
+- **すべてのAPI提供データに対して`@json`を使用することで、YAML Injection脆弱性を完全に防ぐことができる**
 
 **参照**: PR #45 - Task 5.4: RateLimit機能実装（Gemini Code Assistレビュー指摘）
 
