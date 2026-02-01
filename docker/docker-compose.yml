@@ -57,9 +57,9 @@ services:
 
   openappsec-agent:
     # OpenAppSec公式のAgentイメージ
-    # 注意: 特定バージョンを指定することを推奨（再現性のため）
-    # 現在は動作確認のため:latestを使用
-    image: ghcr.io/openappsec/agent:latest
+    # 1.1.32固定: Issue #397 (AccessControlPractice/rateLimit の assetId バグ) 解消まで
+    # https://github.com/openappsec/openappsec/issues/397
+    image: ghcr.io/openappsec/agent:1.1.32-open-source
     platform: linux/amd64
     container_name: mwd-openappsec-agent
     volumes:
@@ -77,8 +77,8 @@ services:
       # デフォルト: true（ローカル管理）
       # SaaS管理UIを使用する場合は docker-compose.saas.yml で false に設定
       - autoPolicyLoad=${APPSEC_AUTO_POLICY_LOAD:-true}
-      # ログレベル（デバッグ調査のためdebugに変更）
-      - OPENAPPSEC_LOG_LEVEL=${OPENAPPSEC_LOG_LEVEL:-debug}
+      # ログレベル（安定運用のためinfo）
+      - OPENAPPSEC_LOG_LEVEL=${OPENAPPSEC_LOG_LEVEL:-info}
       # SaaS管理を使用する場合は docker-compose.saas.yml を参照
       # - AGENT_TOKEN=${APPSEC_AGENT_TOKEN}
       # - user_email=${APPSEC_USER_EMAIL}
