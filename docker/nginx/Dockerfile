@@ -8,22 +8,22 @@ LABEL description="OpenAppSec Nginx with GeoIP2 Module"
 LABEL version="1.0.0"
 
 # 環境変数
-ENV DEBIAN_FRONTEND=noninteractive
 ENV NGINX_VERSION=1.25.4
 ENV GEOIP2_MODULE_VERSION=3.4
 ENV MAXMINDDB_VERSION=1.7.1
 
-# 必要なパッケージのインストール
-RUN apt-get update && \
-    apt-get install -y \
+# 必要なパッケージのインストール（Alpine Linux用）
+RUN apk add --no-cache \
     wget \
     ca-certificates \
-    build-essential \
-    libpcre3-dev \
-    zlib1g-dev \
-    libssl-dev \
+    build-base \
+    pcre-dev \
+    zlib-dev \
+    openssl-dev \
     git \
-    && rm -rf /var/lib/apt/lists/*
+    autoconf \
+    automake \
+    libtool
 
 # libmaxminddbのビルドとインストール
 RUN cd /tmp && \
@@ -99,13 +99,14 @@ RUN cd /tmp/nginx-${NGINX_VERSION} && \
     rm -rf nginx-${NGINX_VERSION}*
 
 # クリーンアップ
-RUN apt-get purge -y \
-    build-essential \
+RUN apk del \
+    build-base \
     wget \
     git \
-    && apt-get autoremove -y \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/*
+    autoconf \
+    automake \
+    libtool \
+    && rm -rf /tmp/*
 
 # GeoIPデータベース用ディレクトリの作成
 RUN mkdir -p /usr/share/GeoIP && \
