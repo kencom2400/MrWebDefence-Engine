@@ -33,7 +33,7 @@ RUN cd /tmp && \
     ./configure && \
     make && \
     make install && \
-    ldconfig && \
+    echo "/usr/local/lib" >> /etc/ld-musl-x86_64.path && \
     cd /tmp && \
     rm -rf libmaxminddb-${MAXMINDDB_VERSION}*
 
