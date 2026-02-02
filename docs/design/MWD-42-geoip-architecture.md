@@ -232,6 +232,8 @@ http {
 
 ### 3.3 GeoIP設定ファイルの生成（例: test.example.com-geoip.conf）
 
+**注意**: この設定ファイルは`http`コンテキストに`include`されます。
+
 ```nginx
 # GeoIP設定: test.example.com
 # 自動生成: 2026-02-02 15:00:00
@@ -269,6 +271,11 @@ map $geoip2_data_country_iso_code $test_example_com_country_blocked {
     RU 1;
 }
 
+# ========================
+# アクセス制御ロジック（2つのアプローチ）
+# ========================
+
+# アプローチ1: 複雑だが柔軟性が高い（完全制御）
 # 最終的なアクセス許可判定（AllowList優先）
 map "$test_example_com_ip_allowed:$test_example_com_ip_blocked:$test_example_com_country_allowed:$test_example_com_country_blocked" $test_example_com_access_denied {
     # ========================
@@ -302,6 +309,47 @@ map "$test_example_com_ip_allowed:$test_example_com_ip_blocked:$test_example_com
     # 2. 変数の結合順序が重要：ip_allowed:ip_blocked:country_allowed:country_blocked
     # 3. 正規表現は左から順に評価され、最初にマッチしたルールが適用される
 }
+
+# ========================
+# アプローチ2: シンプルで保守しやすい（推奨）
+# ========================
+# 単一の変数で最終判定を行う簡素化版
+map "$test_example_com_ip_allowed:$test_example_com_ip_blocked:$test_example_com_country_allowed:$test_example_com_country_blocked" $test_example_com_access_denied_simple {
+    # IP AllowList優先: 即座に許可
+    "1:0:0:0" 0;  # IP AllowList のみ一致
+    "1:1:0:0" 0;  # IP AllowList + IP BlockList → AllowList優先
+    "1:0:1:0" 0;  # IP AllowList + 国コード AllowList
+    "1:0:0:1" 0;  # IP AllowList + 国コード BlockList → AllowList優先
+    "1:1:1:0" 0;  # IP AllowList + その他 → AllowList優先
+    "1:1:0:1" 0;  # IP AllowList + その他 → AllowList優先
+    "1:0:1:1" 0;  # IP AllowList + その他 → AllowList優先
+    "1:1:1:1" 0;  # すべて一致 → AllowList優先
+    
+    # IP BlockList: 拒否（AllowListがない場合のみ）
+    "0:1:0:0" 1;  # IP BlockList のみ一致
+    "0:1:1:0" 1;  # IP BlockList + 国コード AllowList → BlockList優先
+    "0:1:0:1" 1;  # IP BlockList + 国コード BlockList
+    "0:1:1:1" 1;  # IP BlockList + 国コード両方
+    
+    # 国コード AllowList: 許可（IP判定なし）
+    "0:0:1:0" 0;  # 国コード AllowList のみ一致
+    "0:0:1:1" 0;  # 国コード両方 → AllowList優先
+    
+    # 国コード BlockList: 拒否（AllowListがない場合のみ）
+    "0:0:0:1" 1;  # 国コード BlockList のみ一致
+    
+    # デフォルト: すべて不一致
+    default 0;  # 許可（ブラックリストモード）
+    # default 1;  # 拒否（ホワイトリストモード）に変更可能
+}
+
+# ========================
+# 推奨事項
+# ========================
+# - シンプルなユースケース: アプローチ2を使用
+# - 複雑なルール要件: アプローチ1を使用
+# - パフォーマンス: 両アプローチとも同等（Nginxのmap評価は高速）
+# - 保守性: アプローチ2が明示的で理解しやすい
 ```
 
 ### 3.4 FQDN設定ファイルでの使用（例: test.example.com.conf）
@@ -688,7 +736,110 @@ generate_geoip_config_file() {
 
 ### 9.2 GeoIP Updaterのセキュリティ対策
 
-#### 9.2.1 Dockerソケットマウントの代替案
+#### 9.2.1 環境変数検証とコマンドインジェクション対策
+
+**重大なセキュリティリスク**: GeoIP Updaterスクリプトで環境変数を検証せずにシェルコマンドに渡すと、**コマンドインジェクション攻撃**を受ける可能性があります。
+
+**必須の対策**:
+
+```bash
+#!/bin/bash
+# geoip-updater.sh
+
+set -euo pipefail  # エラー時即座に終了、未定義変数使用禁止
+
+# ========================================
+# 1. 環境変数の厳密な検証
+# ========================================
+
+validate_license_key() {
+    local key="$1"
+    # MaxMindライセンスキーの形式検証（16文字の英数字）
+    if ! echo "$key" | grep -qE '^[A-Za-z0-9]{16}$'; then
+        log_error "Invalid MAXMIND_LICENSE_KEY format"
+        return 1
+    fi
+    return 0
+}
+
+validate_container_name() {
+    local name="$1"
+    # Docker container name format validation
+    if ! echo "$name" | grep -qE '^[a-zA-Z0-9][a-zA-Z0-9_.-]+$'; then
+        log_error "Invalid NGINX_CONTAINER_NAME format"
+        return 1
+    fi
+    # コマンドインジェクション防止：危険な文字の検出
+    if echo "$name" | grep -qE '[;|&$`\\]'; then
+        log_error "Dangerous characters detected in container name"
+        return 1
+    fi
+    return 0
+}
+
+# ========================================
+# 2. 環境変数の読み込みと検証
+# ========================================
+
+MAXMIND_LICENSE_KEY="${MAXMIND_LICENSE_KEY:-}"
+NGINX_CONTAINER_NAME="${NGINX_CONTAINER_NAME:-mwd-nginx}"
+
+# 必須環境変数のチェック
+if [[ -z "$MAXMIND_LICENSE_KEY" ]]; then
+    log_error "MAXMIND_LICENSE_KEY is not set"
+    exit 1
+fi
+
+# 検証実行
+if ! validate_license_key "$MAXMIND_LICENSE_KEY"; then
+    log_error "Invalid license key, aborting"
+    exit 1
+fi
+
+if ! validate_container_name "$NGINX_CONTAINER_NAME"; then
+    log_error "Invalid container name, aborting"
+    exit 1
+fi
+
+# ========================================
+# 3. 安全なコマンド実行
+# ========================================
+
+# 悪い例（コマンドインジェクションの危険性）:
+# docker exec $NGINX_CONTAINER_NAME nginx -s reload
+
+# 良い例（変数を引用符で囲む）:
+docker exec "$NGINX_CONTAINER_NAME" nginx -s reload
+
+# より良い例（配列を使用）:
+declare -a cmd=(docker exec "$NGINX_CONTAINER_NAME" nginx -s reload)
+"${cmd[@]}"
+
+# ========================================
+# 4. URLの安全な構築
+# ========================================
+
+# 悪い例（コマンドインジェクションの危険性）:
+# curl "https://download.maxmind.com/app/geoip_download?license_key=${MAXMIND_LICENSE_KEY}&..."
+
+# 良い例（curlの--data-urlencode使用）:
+curl -L -f \
+    --data-urlencode "license_key=${MAXMIND_LICENSE_KEY}" \
+    "https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-Country&suffix=tar.gz" \
+    -o /tmp/GeoLite2-Country.tar.gz
+
+# または、URLエンコード関数を使用:
+urlencode() {
+    local string="$1"
+    python3 -c "import urllib.parse; print(urllib.parse.quote('$string'))"
+}
+
+encoded_key=$(urlencode "$MAXMIND_LICENSE_KEY")
+curl -L -f "https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-Country&license_key=${encoded_key}&suffix=tar.gz" \
+    -o /tmp/GeoLite2-Country.tar.gz
+```
+
+#### 9.2.2 Dockerソケットマウントの代替案
 
 **現在の実装の問題点**: `geoip-updater`コンテナにDockerソケット（`/var/run/docker.sock`）をマウントすることは、コンテナがホストのDocker APIに完全アクセスできることを意味し、重大なセキュリティリスクです。
 
