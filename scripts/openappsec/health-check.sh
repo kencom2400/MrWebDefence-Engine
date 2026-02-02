@@ -5,9 +5,15 @@
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-DOCKER_DIR="${REPO_ROOT}/docker"
+# 作業ディレクトリの設定
+# 環境変数で指定されている場合はそれを使用、なければ相対パスから計算
+if [ -n "$HEALTH_CHECK_CWD" ]; then
+    DOCKER_DIR="$HEALTH_CHECK_CWD"
+else
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+    DOCKER_DIR="${REPO_ROOT}/docker"
+fi
 
 cd "$DOCKER_DIR"
 
