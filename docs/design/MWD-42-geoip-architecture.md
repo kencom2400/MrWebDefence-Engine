@@ -13,10 +13,92 @@ MaxMindDB GeoLite2-Countryデータベースを使用して、IP/CIDR範囲お�
 - FQDN別の細かい制御
 - GeoIPデータベースの自動更新
 
-### 1.3 制約条件
-- Nginx `map`および`geo`ディレクティブは`http`コンテキストでのみ使用可能
-- `server`コンテキストでは`if`ディレクティブと変数のみ使用可能
-- FQDN別設定ファイル（`*.conf`）は`server`コンテキスト
+### 1.3 制約条件とアーキテクチャへの影響
+
+#### 1.3.1 Nginx設定ディレクティブの制約
+
+**重要**: Nginxの`geo`および`map`ディレクティブは**httpコンテキストでのみ使用可能**です。これは、以下のような設定構造を強制します：
+
+```nginx
+# ❌ 不可能な構成（geo/mapをserverコンテキストに配置）
+server {
+    listen 80;
+    server_name test.example.com;
+    
+    # エラー: geoディレクティブはhttpコンテキストでのみ使用可能
+    geo $ip_allowlist {
+        default 0;
+        192.168.1.0/24 1;
+    }
+    
+    # エラー: mapディレクティブはhttpコンテキストでのみ使用可能
+    map $geoip2_data_country_iso_code $country_blocked {
+        default 0;
+        RU 1;
+    }
+}
+```
+
+```nginx
+# ✅ 正しい構成（geo/mapをhttpコンテキストに配置）
+http {
+    # httpコンテキスト: geo/mapディレクティブを定義
+    geo $ip_allowlist {
+        default 0;
+        192.168.1.0/24 1;
+    }
+    
+    map $geoip2_data_country_iso_code $country_blocked {
+        default 0;
+        RU 1;
+    }
+    
+    # serverコンテキスト: 定義済み変数を使用
+    server {
+        listen 80;
+        server_name test.example.com;
+        
+        # OK: 変数とifディレクティブの使用は可能
+        if ($ip_allowlist = 0) {
+            # アクセス制御ロジック
+        }
+    }
+}
+```
+
+#### 1.3.2 ConfigAgentの実装への影響
+
+この制約により、ConfigAgentは以下のような制限を受けます：
+
+1. **FQDN別設定ファイル（`conf.d/*.conf`）の制限**
+   - これらのファイルは`server`コンテキストとして読み込まれる
+   - `geo`/`map`ディレクティブは使用**不可能**
+   - 変数と`if`ディレクティブのみ使用可能
+
+2. **GeoIP設定ファイル（`geoip/*.conf`）の要件**
+   - これらのファイルは`http`コンテキストに`include`される必要がある
+   - `geo`/`map`ディレクティブを使用可能
+   - `server`ブロックは含めない
+
+3. **nginx.confの構造要件**
+   ```nginx
+   http {
+       # GeoIP2データベースロード
+       geoip2 /usr/share/GeoIP/GeoLite2-Country.mmdb { ... }
+       
+       # 重要: httpコンテキスト内でgeoip/*.confをinclude
+       include /etc/nginx/geoip/*.conf;
+       
+       # serverコンテキストの設定をinclude
+       include /etc/nginx/conf.d/*.conf;
+   }
+   ```
+
+#### 1.3.3 この制約を考慮した設計決定
+
+- **ハイブリッドアプローチの採用理由**: nginx.confは静的に保ち、`http`コンテキストでGeoIP設定ファイルをincludeすることで、Nginx制約を遵守しながらFQDN別の細かい制御を実現
+- **2種類の設定ファイル**: GeoIP設定ファイル（`http`コンテキスト用）とFQDN設定ファイル（`server`コンテキスト用）を分離
+- **変数による連携**: `http`コンテキストで定義した変数を、`server`コンテキストで参照
 
 ## 2. アーキテクチャの選択肢
 
@@ -189,20 +271,36 @@ map $geoip2_data_country_iso_code $test_example_com_country_blocked {
 
 # 最終的なアクセス許可判定（AllowList優先）
 map "$test_example_com_ip_allowed:$test_example_com_ip_blocked:$test_example_com_country_allowed:$test_example_com_country_blocked" $test_example_com_access_denied {
-    # AllowList優先（IP AllowListに一致したら常に許可）
-    "~^1:" 0;  # IP AllowListに一致 → 許可
+    # ========================
+    # AllowList優先ロジック
+    # ========================
+    # ステップ1: IP AllowListチェック（最優先）
+    # IP AllowListに一致したら、他の条件に関係なく常に許可
+    "~^1:" 0;  # IP AllowListに一致 → アクセス許可（access_denied=0）
     
-    # IP BlockListチェック
-    "~^0:1:" 1;  # IP BlockListに一致 → 拒否
+    # ステップ2: IP BlockListチェック
+    # IP AllowListに一致せず、IP BlockListに一致したら拒否
+    "~^0:1:" 1;  # IP BlockListに一致 → アクセス拒否（access_denied=1）
     
-    # 国コード AllowListチェック（IP AllowList/BlockListに一致しない場合）
-    "~^0:0:1:" 0;  # 国コード AllowListに一致 → 許可
+    # ステップ3: 国コード AllowListチェック
+    # IP AllowList/BlockListに一致せず、国コード AllowListに一致したら許可
+    "~^0:0:1:" 0;  # 国コード AllowListに一致 → アクセス許可
     
-    # 国コード BlockListチェック
-    "~^0:0:0:1" 1;  # 国コード BlockListに一致 → 拒否
+    # ステップ4: 国コード BlockListチェック
+    # 国コード BlockListに一致したら拒否
+    "~^0:0:0:1" 1;  # 国コード BlockListに一致 → アクセス拒否
     
-    # デフォルト（どのリストにも一致しない）
-    default 0;  # 許可
+    # ステップ5: デフォルト（どのリストにも一致しない場合）
+    # ポリシーに応じて決定：
+    # - ホワイトリストモード: デフォルト拒否（AllowListにない場合は拒否）
+    # - ブラックリストモード: デフォルト許可（BlockListにない場合は許可）
+    default 0;  # デフォルト: 許可（ブラックリストモード）
+    
+    # 注意事項:
+    # 1. AllowListが定義されている場合はホワイトリストモードとして動作させる場合、
+    #    デフォルトを "default 1;" に変更
+    # 2. 変数の結合順序が重要：ip_allowed:ip_blocked:country_allowed:country_blocked
+    # 3. 正規表現は左から順に評価され、最初にマッチしたルールが適用される
 }
 ```
 
@@ -460,20 +558,213 @@ mkdir -p "${OUTPUT_DIR}/conf.d"
 
 ## 9. セキュリティ考慮事項
 
-### 9.1 入力検証
-- FQDN名のサニタイズ（Nginx変数名として安全）
-- IP/CIDR範囲の検証（Nginx起動時に自動検証）
-- 国コードの検証（ISO 3166-1 alpha-2準拠）
+### 9.1 入力検証とNginx設定インジェクション対策
 
-### 9.2 DoS対策
+**重大なセキュリティリスク**: 管理APIからのデータをNginx設定ファイルに挿入する際、検証を行わないと**Nginx設定インジェクション攻撃**を受ける可能性があります。
+
+#### 9.1.1 必須の入力検証
+
+ConfigAgentでNginx設定を生成する際、以下の検証を**必ず**実施する必要があります：
+
+1. **FQDN名の検証とサニタイズ**
+   ```bash
+   validate_fqdn() {
+       local fqdn="$1"
+       # FQDNの形式検証（RFC 1035準拠）
+       if ! echo "$fqdn" | grep -qE '^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$'; then
+           log_error "Invalid FQDN format: $fqdn"
+           return 1
+       fi
+       # 変数名として安全な文字のみ許可
+       if echo "$fqdn" | grep -qE '[^a-zA-Z0-9.-]'; then
+           log_error "FQDN contains unsafe characters: $fqdn"
+           return 1
+       fi
+       return 0
+   }
+   ```
+
+2. **IP/CIDR範囲の厳密な検証**
+   ```bash
+   validate_ip_cidr() {
+       local ip_cidr="$1"
+       # IPv4 CIDR形式の検証
+       if ! echo "$ip_cidr" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?$'; then
+           log_error "Invalid IP/CIDR format: $ip_cidr"
+           return 1
+       fi
+       # IPアドレスの範囲検証（0-255）
+       local IFS='.'
+       read -ra OCTETS <<< "${ip_cidr%/*}"
+       for octet in "${OCTETS[@]}"; do
+           if [[ $octet -gt 255 ]]; then
+               log_error "Invalid IP octet: $octet in $ip_cidr"
+               return 1
+           fi
+       done
+       # CIDR範囲の検証（0-32）
+       if [[ "$ip_cidr" =~ / ]]; then
+           local cidr="${ip_cidr##*/}"
+           if [[ $cidr -gt 32 ]] || [[ $cidr -lt 0 ]]; then
+               log_error "Invalid CIDR range: $cidr"
+               return 1
+           fi
+       fi
+       return 0
+   }
+   ```
+
+3. **国コードの厳密な検証**
+   ```bash
+   validate_country_code() {
+       local country_code="$1"
+       # ISO 3166-1 alpha-2形式（大文字2文字）の検証
+       if ! echo "$country_code" | grep -qE '^[A-Z]{2}$'; then
+           log_error "Invalid country code format: $country_code"
+           return 1
+       fi
+       # ホワイトリスト方式による検証（推奨）
+       local valid_codes="US JP GB DE FR CN RU KP ..." # 実際のISO 3166-1 alpha-2全リスト
+       if ! echo "$valid_codes" | grep -qw "$country_code"; then
+           log_error "Unknown country code: $country_code"
+           return 1
+       fi
+       return 0
+   }
+   ```
+
+4. **Nginxディレクティブのインジェクション防止**
+   ```bash
+   sanitize_for_nginx_config() {
+       local value="$1"
+       # Nginx設定ファイルで危険な文字を検出（;, {, }, など）
+       if echo "$value" | grep -qE '[;{}#$`\\]'; then
+           log_error "Dangerous characters detected in value: $value"
+           return 1
+       fi
+       # 改行文字の削除
+       value="${value//[$'\n\r']/}"
+       echo "$value"
+   }
+   ```
+
+#### 9.1.2 設定ファイル生成時の安全対策
+
+```bash
+generate_geoip_config_file() {
+    local fqdn="$1"
+    local fqdn_config="$2"
+    
+    # 入力検証
+    if ! validate_fqdn "$fqdn"; then
+        log_error "Invalid FQDN, skipping: $fqdn"
+        return 1
+    fi
+    
+    # IP AllowListの検証
+    local ip_list
+    ip_list=$(echo "$fqdn_config" | jq -r '.geoip.ip_allowlist[]? // empty')
+    for ip in $ip_list; do
+        if ! validate_ip_cidr "$ip"; then
+            log_error "Invalid IP in allowlist for $fqdn: $ip"
+            return 1
+        fi
+    done
+    
+    # 国コードの検証
+    local country_list
+    country_list=$(echo "$fqdn_config" | jq -r '.geoip.country_allowlist[]? // empty')
+    for country in $country_list; do
+        if ! validate_country_code "$country"; then
+            log_error "Invalid country code for $fqdn: $country"
+            return 1
+        fi
+    done
+    
+    # 検証済みデータのみを使用して設定生成
+    # ...
+}
+```
+
+### 9.2 GeoIP Updaterのセキュリティ対策
+
+#### 9.2.1 Dockerソケットマウントの代替案
+
+**現在の実装の問題点**: `geoip-updater`コンテナにDockerソケット（`/var/run/docker.sock`）をマウントすることは、コンテナがホストのDocker APIに完全アクセスできることを意味し、重大なセキュリティリスクです。
+
+**推奨される代替案**:
+
+**オプションA: Docker exec APIの制限付き使用**（採用）
+```yaml
+# docker-compose.yml
+geoip-updater:
+  build: ../geoip-updater
+  volumes:
+    - geoip-data:/usr/share/GeoIP:rw
+    - /var/run/docker.sock:/var/run/docker.sock:ro  # 読み取り専用
+  environment:
+    - MAXMIND_LICENSE_KEY=${MAXMIND_LICENSE_KEY}
+    - NGINX_CONTAINER_NAME=mwd-nginx
+  # セキュリティ強化
+  read_only: true
+  cap_drop:
+    - ALL
+  cap_add:
+    - NET_ADMIN  # 最小限の権限のみ
+  security_opt:
+    - no-new-privileges:true
+```
+
+**オプションB: Nginx設定リロード用APIエンドポイント**（より安全）
+```yaml
+# 専用のreload-apiサービスを追加
+reload-api:
+  image: alpine:latest
+  command: sh -c "while true; do nc -l -p 8888 -e sh -c 'docker exec mwd-nginx nginx -s reload'; done"
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock:ro
+  networks:
+    - internal
+
+geoip-updater:
+  build: ../geoip-updater
+  volumes:
+    - geoip-data:/usr/share/GeoIP:rw
+  environment:
+    - MAXMIND_LICENSE_KEY=${MAXMIND_LICENSE_KEY}
+    - RELOAD_API_URL=http://reload-api:8888
+  # Dockerソケットへのアクセス不要
+```
+
+**オプションC: 共有ボリューム + inotify監視**（最も安全）
+```yaml
+# Nginxコンテナ内でinotifyを使用してGeoIPファイルの変更を監視
+nginx:
+  volumes:
+    - geoip-data:/usr/share/GeoIP:ro
+    - ./nginx/reload-on-change.sh:/docker-entrypoint.d/40-reload-on-change.sh:ro
+  # reload-on-change.sh内でinotifywaitを使用
+```
+
+```bash
+# nginx/reload-on-change.sh
+#!/bin/bash
+inotifywait -m -e close_write /usr/share/GeoIP/GeoLite2-Country.mmdb | while read; do
+    nginx -t && nginx -s reload
+done &
+```
+
+### 9.3 DoS対策
 - rate-limitと組み合わせ使用
 - GeoIPによる国レベルのブロック
 - 既知の悪意あるIPレンジのブロック
+- 設定ファイルサイズの上限設定（ConfigAgent）
 
-### 9.3 ログ記録
+### 9.4 ログ記録と監査
 - すべてのアクセス制御決定をログに記録
 - GeoIP情報をログに含める
 - 監査証跡の確保
+- ConfigAgentの設定変更履歴を記録
 
 ## 10. 運用手順
 
