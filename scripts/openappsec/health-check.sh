@@ -22,8 +22,11 @@ declare -A health_status
 health_status["nginx"]="unknown"
 health_status["openappsec-agent"]="unknown"
 health_status["config-agent"]="unknown"
+health_status["redis"]="unknown"
+health_status["fluentd"]="unknown"
 health_status["nginx_config"]="unknown"
 health_status["openappsec_config"]="unknown"
+health_status["redis_connection"]="unknown"
 
 # エラーメッセージ
 declare -A error_messages
@@ -74,42 +77,115 @@ check_config_agent() {
     fi
 }
 
+# Redisヘルスチェック
+check_redis() {
+    if docker-compose ps redis 2>/dev/null | grep -q "Up"; then
+        health_status["redis"]="healthy"
+        
+        # Redis接続確認（PING）
+        # パスワード認証に対応
+        local redis_auth_arg=""
+        if [ -n "$REDIS_PASSWORD" ]; then
+            redis_auth_arg="-a $REDIS_PASSWORD"
+        fi
+
+        if docker-compose exec -T redis redis-cli ${redis_auth_arg} ping >/dev/null 2>&1; then
+            health_status["redis_connection"]="ok"
+        else
+            health_status["redis_connection"]="failed"
+            error_messages["redis_connection"]="Redisへの接続に失敗しました"
+        fi
+    else
+        health_status["redis"]="unhealthy"
+        error_messages["redis"]="Redisコンテナが起動していません"
+    fi
+}
+
+# Fluentdヘルスチェック
+check_fluentd() {
+    if docker-compose ps fluentd 2>/dev/null | grep -q "Up"; then
+        health_status["fluentd"]="healthy"
+    else
+        health_status["fluentd"]="unhealthy"
+        error_messages["fluentd"]="Fluentdコンテナが起動していません（オプション）"
+    fi
+}
+
+# システム情報の取得
+get_system_info() {
+    local nginx_version
+    
+    nginx_version=$(docker-compose exec -T nginx nginx -v 2>&1 | grep -oP 'nginx/\K[0-9.]+' || echo "unknown")
+    
+    # jqを使って安全にJSONを生成（特殊文字のエスケープに対応）
+    jq -n \
+      --arg nginx_version "$nginx_version" \
+      --arg timestamp "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+      --arg hostname "$(hostname)" \
+      '{nginx_version: $nginx_version, timestamp: $timestamp, hostname: $hostname}'
+}
+
 # すべてのチェックを実行
 check_nginx
 check_openappsec_agent
 check_config_agent
+check_redis
+check_fluentd
 
 # 結果の出力
 if [ "$output_json" = true ]; then
-    # JSON形式で出力
-    echo "{"
-    echo "  \"status\": \"$(
-        if [ "${health_status[nginx]}" = "healthy" ] && \
-           [ "${health_status[openappsec-agent]}" = "healthy" ]; then
-            echo "healthy"
-        else
-            echo "unhealthy"
-        fi
-    )\","
-    echo "  \"components\": {"
-    echo "    \"nginx\": \"${health_status[nginx]}\","
-    echo "    \"nginx_config\": \"${health_status[nginx_config]}\","
-    echo "    \"openappsec_agent\": \"${health_status[openappsec-agent]}\","
-    echo "    \"openappsec_config\": \"${health_status[openappsec_config]}\","
-    echo "    \"config_agent\": \"${health_status[config-agent]}\""
-    echo "  },"
-    echo "  \"errors\": ["
-    local first_error=true
-    for key in "${!error_messages[@]}"; do
-        if [ "$first_error" = true ]; then
-            first_error=false
-        else
-            echo ","
-        fi
-        echo "    {\"component\": \"$key\", \"message\": \"${error_messages[$key]}\"}"
-    done
-    echo "  ]"
-    echo "}"
+    # JSON形式で出力（jqを使用して安全に生成）
+    # システム情報を取得
+    system_info=$(get_system_info)
+    
+    # 全体ステータスの判定
+    overall_status="healthy"
+    if [ "${health_status[nginx]}" != "healthy" ] || \
+       [ "${health_status[openappsec-agent]}" != "healthy" ]; then
+        overall_status="unhealthy"
+    fi
+    
+    # エラーメッセージの配列を作成
+    errors_json="[]"
+    if [ ${#error_messages[@]} -gt 0 ]; then
+        errors_json=$(
+            for key in "${!error_messages[@]}"; do
+                jq -n \
+                  --arg component "$key" \
+                  --arg message "${error_messages[$key]}" \
+                  '{component: $component, message: $message}'
+            done | jq -s '.'
+        )
+    fi
+    
+    # 最終的なJSONを出力
+    jq -n \
+      --arg status "$overall_status" \
+      --arg nginx "${health_status[nginx]}" \
+      --arg nginx_config "${health_status[nginx_config]}" \
+      --arg openappsec_agent "${health_status[openappsec-agent]}" \
+      --arg openappsec_config "${health_status[openappsec_config]}" \
+      --arg config_agent "${health_status[config-agent]}" \
+      --arg redis "${health_status[redis]}" \
+      --arg redis_connection "${health_status[redis_connection]}" \
+      --arg fluentd "${health_status[fluentd]}" \
+      --argjson system_info "$system_info" \
+      --argjson errors "$errors_json" \
+      '{
+        status: $status,
+        components: {
+          nginx: $nginx,
+          nginx_config: $nginx_config,
+          openappsec_agent: $openappsec_agent,
+          openappsec_config: $openappsec_config,
+          config_agent: $config_agent,
+          redis: $redis,
+          redis_connection: $redis_connection,
+          fluentd: $fluentd
+        },
+        system_info: $system_info,
+        errors: $errors
+      }'
 else
     # 人間が読みやすい形式で出力
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -127,6 +203,13 @@ else
     fi
     echo ""
     echo "ConfigAgent: ${health_status[config-agent]}"
+    echo ""
+    echo "Redis: ${health_status[redis]}"
+    if [ "${health_status[redis_connection]}" != "unknown" ]; then
+        echo "  - 接続: ${health_status[redis_connection]}"
+    fi
+    echo ""
+    echo "Fluentd: ${health_status[fluentd]}"
     echo ""
     
     if [ ${#error_messages[@]} -gt 0 ]; then
