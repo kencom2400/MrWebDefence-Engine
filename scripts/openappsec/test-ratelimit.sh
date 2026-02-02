@@ -171,7 +171,8 @@ echo ""
 echo -e "${BLUE}📋 4. RateLimit機能のテスト${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-TEST_FQDN="test.example.com"
+# テスト対象FQDNを動的に取得（堅牢性向上）
+TEST_FQDN=$(grep -m 1 'host:' ./openappsec/local_policy.yaml | awk '{print $2}' | tr -d '"' || echo "test.example.com")
 echo "テスト対象FQDN: ${TEST_FQDN}"
 echo "ポリシー: uri \"/\", 100リクエスト/分, action: prevent（policy-generator.sh 準拠）"
 echo ""

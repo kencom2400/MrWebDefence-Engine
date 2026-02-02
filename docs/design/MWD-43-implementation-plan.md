@@ -221,8 +221,9 @@ class HealthAPIHandler(BaseHTTPRequestHandler):
         
         if path == '/engine/v1/health':
             self.handle_health_check()
-        elif path == '/health' or path == '/':
+        elif path == '/health':
             # 簡易版ヘルスチェック（200 OKのみ）
+            # Kubernetes liveness probe用
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
@@ -241,12 +242,14 @@ class HealthAPIHandler(BaseHTTPRequestHandler):
             # health-check.shスクリプトを実行
             # タイムアウトは環境変数で設定可能（デフォルト10秒）
             timeout = int(os.environ.get('HEALTH_CHECK_TIMEOUT', '10'))
+            # 作業ディレクトリも環境変数で設定可能（柔軟性向上）
+            cwd = os.environ.get('HEALTH_CHECK_CWD', '/app/docker')
             result = subprocess.run(
                 [HEALTH_CHECK_SCRIPT, '--json'],
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                cwd='/app/docker'
+                cwd=cwd
             )
             
             if result.returncode == 0:
@@ -358,6 +361,7 @@ CMD ["python3", "/app/health-api-server.py"]
     environment:
       - HEALTH_API_PORT=8888
       - HEALTH_CHECK_TIMEOUT=10  # ヘルスチェックタイムアウト（秒、デフォルト10秒）
+      - HEALTH_CHECK_CWD=/app/docker  # health-check.sh実行時の作業ディレクトリ
     ports:
       - "8888:8888"
     networks:
@@ -689,7 +693,7 @@ curl -s http://localhost:8888/engine/v1/health | jq '.components.redis'
 
 - **Dockerコンテナが存在しない場合**: `unknown`ステータスを返す
 - **docker-composeコマンドが失敗した場合**: エラーログを出力し、`unknown`ステータスを返す
-- **タイムアウト**: 30秒でタイムアウト
+- **タイムアウト**: 10秒でタイムアウト（health-api-server.pyから呼び出される場合）
 
 ### 2. health-api-server.pyのエラーハンドリング
 
@@ -726,7 +730,7 @@ health-apiコンテナはDockerソケットをマウントします。これに�
 
 - **並列処理**: 各コンポーネントのチェックを並列実行（将来の拡張）
 - **キャッシュ**: 頻繁なリクエストに対して結果をキャッシュ（オプション）
-- **タイムアウト**: 30秒でタイムアウト
+- **タイムアウト**: 10秒でタイムアウト（環境変数で変更可能）
 
 ### 2. 軽量な実装
 
@@ -749,7 +753,7 @@ health-apiコンテナはDockerソケットをマウントします。これに�
 **影響**: ヘルスチェックAPIが応答しない
 
 **対策**:
-- 30秒でタイムアウト
+- デフォルト10秒でタイムアウト（環境変数`HEALTH_CHECK_TIMEOUT`で変更可能）
 - タイムアウト時にHTTP 503を返す
 - ログに詳細なエラーメッセージを出力
 
