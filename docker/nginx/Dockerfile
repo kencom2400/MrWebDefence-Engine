@@ -65,7 +65,6 @@ RUN cd /tmp && \
     --user=nginx \
     --group=nginx \
     --with-compat \
-    --with-file-aio \
     --with-threads \
     --with-http_addition_module \
     --with-http_auth_request_module \
