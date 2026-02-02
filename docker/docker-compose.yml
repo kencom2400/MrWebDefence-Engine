@@ -280,7 +280,11 @@ services:
       # Dockerソケット（コンテナ状態確認用）
       # セキュリティ警告: Dockerソケットへのアクセスにより、
       # 他のコンテナの情報（設定、メタデータ、環境変数）を読み取り可能。
-      # 本番環境では必ずHEALTH_API_TOKENを設定し、ネットワークアクセスを制限すること。
+      # 本番環境では以下の対策を必ず実施すること:
+      # 1. HEALTH_API_TOKENを設定（必須）
+      # 2. ALLOW_UNAUTHENTICATED=false を設定（デフォルト）
+      # 3. ポート公開を削除し、内部ネットワーク経由でのみアクセス許可
+      # 4. ネットワークアクセス制限（ファイアウォール・セキュリティグループ）
       - /var/run/docker.sock:/var/run/docker.sock:ro
       # docker-composeファイル（health-check.shで使用）
       - ./docker-compose.yml:/app/docker/docker-compose.yml:ro
@@ -290,6 +294,11 @@ services:
       - HEALTH_CHECK_CWD=/app/docker  # health-check.sh実行時の作業ディレクトリ
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}  # Redis認証パスワード（health-check.shで使用）
       - HEALTH_API_TOKEN=${HEALTH_API_TOKEN:-}  # API認証トークン（本番環境では必須）
+      # Fail-Closed原則: トークン未設定時は起動しない（デフォルト）
+      # 開発環境で認証なしで起動する場合のみ ALLOW_UNAUTHENTICATED=true を設定
+      - ALLOW_UNAUTHENTICATED=${ALLOW_UNAUTHENTICATED:-false}
+    # セキュリティ: 本番環境ではポート公開を削除し、内部ネットワークのみでアクセス
+    # 開発環境のみポートを公開する場合は以下をコメントアウト解除
     ports:
       - "8888:8888"
     networks:

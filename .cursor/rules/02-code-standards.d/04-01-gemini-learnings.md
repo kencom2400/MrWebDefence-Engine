@@ -13680,3 +13680,369 @@ fi
 
 ---
 
+
+## Gemini 3回目レビューの観点（PR #48）
+
+### 評価
+
+**総評**: "Comprehensive and well-thought-out implementation"
+
+**指摘事項**: 4つの改善点（セキュリティ、パフォーマンス、ドキュメント）
+
+---
+
+### 30-1. Fail-Closed原則とタイミング攻撃対策 🔴 Security-Medium
+
+**問題1**: API認証トークン未設定時でもサーバーが起動する（Fail-Open設計）
+
+**脆弱な実装**:
+```python
+# ❌ 悪い例: トークン未設定でも起動（Fail-Open）
+API_TOKEN = os.environ.get('HEALTH_API_TOKEN', '')
+if not API_TOKEN:
+    logger.warning("⚠️  HEALTH_API_TOKEN が設定されていません。本番環境では必ず設定してください。")
+
+def _check_authentication(self):
+    if not API_TOKEN:
+        return True  # 認証をスキップ
+```
+
+**問題2**: 文字列比較によるタイミング攻撃の可能性
+
+```python
+# ❌ 悪い例: 通常の文字列比較
+if token == API_TOKEN:
+    return True
+```
+
+**堅牢な実装**:
+```python
+# ✅ 良い例: Fail-Closed + タイミング攻撃対策
+import hmac
+import sys
+
+API_TOKEN = os.environ.get('HEALTH_API_TOKEN', '')
+ALLOW_UNAUTHENTICATED = os.environ.get('ALLOW_UNAUTHENTICATED', 'false').lower() == 'true'
+
+if not API_TOKEN:
+    if ALLOW_UNAUTHENTICATED:
+        logger.warning("⚠️  開発環境専用モードで起動します。")
+    else:
+        logger.error("❌ エラー: HEALTH_API_TOKEN が設定されていません。")
+        logger.error("開発環境で認証なしで起動する場合は ALLOW_UNAUTHENTICATED=true を設定してください。")
+        sys.exit(1)
+
+def _check_authentication(self):
+    if not API_TOKEN:
+        return True  # ALLOW_UNAUTHENTICATED=true の場合のみここに到達
+    
+    auth_header = self.headers.get('Authorization', '')
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+        # タイミング攻撃対策: hmac.compare_digest() を使用
+        if hmac.compare_digest(token, API_TOKEN):
+            return True
+    
+    return False
+```
+
+**Fail-Closed原則**:
+- デフォルトで**拒否**（認証必須）
+- 開発環境のみ明示的に許可（`ALLOW_UNAUTHENTICATED=true`）
+- 本番環境での誤設定を防止
+
+**タイミング攻撃対策**:
+- `==` 演算子: 文字列比較で処理時間が変化 → トークン推測可能
+- `hmac.compare_digest()`: 一定時間で比較 → 推測不可能
+
+**Docker Compose設定**:
+```yaml
+environment:
+  - HEALTH_API_TOKEN=${HEALTH_API_TOKEN:-}  # 本番環境では必須
+  - ALLOW_UNAUTHENTICATED=${ALLOW_UNAUTHENTICATED:-false}  # デフォルトfalse
+```
+
+**参照**: PR #48（Gemini 3回目レビュー - Security-Medium）
+
+---
+
+### 30-2. 本番環境でのポート公開削除 🔴 Security-Medium
+
+**問題**: Dockerソケットマウント + ポート公開により、外部から機密情報にアクセス可能
+
+**セキュリティリスク**:
+```yaml
+# ❌ リスク: 外部に公開 + Dockerソケットアクセス
+services:
+  health-api:
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "8888:8888"  # 外部アクセス可能
+```
+
+**攻撃シナリオ**:
+1. 外部から`http://<host>:8888/engine/v1/health`にアクセス（認証なしの場合）
+2. Dockerソケット経由で他のコンテナ情報を取得
+3. 環境変数、設定ファイル、メタデータを読み取り
+4. データベースパスワード、APIキー等が漏洩
+
+**安全な設定**:
+```yaml
+# ✅ 良い例: 本番環境ではポート公開しない
+services:
+  health-api:
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - HEALTH_API_TOKEN=${HEALTH_API_TOKEN}  # 必須
+      - ALLOW_UNAUTHENTICATED=false  # 認証必須
+    # 本番環境ではポート公開を削除
+    # ports:
+    #   - "8888:8888"
+    networks:
+      - mwd-network
+```
+
+**アクセス方法**:
+```bash
+# 内部ネットワークからのみアクセス
+docker-compose exec nginx curl http://health-api:8888/engine/v1/health
+
+# または、他のコンテナから
+docker-compose exec some-service curl \
+  -H "Authorization: Bearer ${HEALTH_API_TOKEN}" \
+  http://health-api:8888/engine/v1/health
+```
+
+**多層防御戦略**:
+1. **API認証**: Bearer Token必須
+2. **ネットワーク分離**: 内部ネットワークのみ
+3. **ポート非公開**: `ports`を削除
+4. **ファイアウォール**: さらに外部アクセスを制限
+5. **監視**: アクセスログを記録
+
+**開発環境での設定**:
+```yaml
+# 開発環境: docker-compose.override.yml で公開
+services:
+  health-api:
+    ports:
+      - "8888:8888"
+    environment:
+      - ALLOW_UNAUTHENTICATED=true  # 開発のみ
+```
+
+**参照**: PR #48（Gemini 3回目レビュー - Security-Medium）
+
+---
+
+### 30-3. curlの効率的な使用 🟢 Performance
+
+**問題**: レスポンスボディとHTTPステータスコードを取得するために2回curlを実行
+
+**非効率な実装**:
+```bash
+# ❌ 悪い例: 2回curlを実行（約2倍の時間）
+response=$(curl -s http://localhost:8888/health)
+http_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8888/health)
+
+status=$(echo "$response" | jq -r '.status')
+```
+
+**効率的な実装**:
+```bash
+# ✅ 良い例: 1回のcurlで両方取得
+response=$(curl -s -w "\n%{http_code}" http://localhost:8888/health)
+http_code=$(echo "$response" | tail -n1)
+body=$(echo "$response" | sed '$d')
+
+status=$(echo "$body" | jq -r '.status')
+```
+
+**仕組み**:
+1. `-w "\n%{http_code}"`: レスポンスボディの後に改行 + HTTPコードを追加
+2. `tail -n1`: 最終行（HTTPコード）を抽出
+3. `sed '$d'`: 最終行を削除してボディのみ取得
+
+**パフォーマンス向上**:
+- **実行時間**: 約50%削減（ネットワーク往復1回分削減）
+- **リソース使用**: プロセス起動回数半減
+- **テスト速度**: テストスクリプト全体で数秒短縮
+
+**注意点**:
+```bash
+# レスポンスボディに改行が含まれる場合でも正常に動作
+# 例: JSON形式のレスポンス
+{
+  "status": "healthy",
+  "components": {...}
+}
+200
+
+# body: JSON部分のみ
+# http_code: 200
+```
+
+**応用例**:
+```bash
+# ヘッダーも取得する場合
+response=$(curl -s -i -w "\n%{http_code}" http://localhost:8888/health)
+http_code=$(echo "$response" | tail -n1)
+headers_and_body=$(echo "$response" | sed '$d')
+```
+
+**参照**: PR #48（Gemini 3回目レビュー - Performance）
+
+---
+
+### 30-4. 本番環境設定ガイダンスの文書化 📚 Documentation
+
+**問題**: ポート公開を削除する方法や本番環境での推奨設定が不明確
+
+**改善点**: docker-compose.ymlにインラインドキュメントを追加
+
+**文書化のベストプラクティス**:
+```yaml
+services:
+  health-api:
+    # ヘルスチェックAPIサーバー
+    build:
+      context: ./health-api
+      dockerfile: Dockerfile
+    container_name: mwd-health-api
+    volumes:
+      # Dockerソケット（コンテナ状態確認用）
+      # セキュリティ警告: Dockerソケットへのアクセスにより、
+      # 他のコンテナの情報（設定、メタデータ、環境変数）を読み取り可能。
+      # 本番環境では以下の対策を必ず実施すること:
+      # 1. HEALTH_API_TOKENを設定（必須）
+      # 2. ALLOW_UNAUTHENTICATED=false を設定（デフォルト）
+      # 3. ポート公開を削除し、内部ネットワーク経由でのみアクセス許可
+      # 4. ネットワークアクセス制限（ファイアウォール・セキュリティグループ）
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - HEALTH_API_TOKEN=${HEALTH_API_TOKEN:-}  # 本番環境では必須
+      # Fail-Closed原則: トークン未設定時は起動しない（デフォルト）
+      # 開発環境で認証なしで起動する場合のみ ALLOW_UNAUTHENTICATED=true を設定
+      - ALLOW_UNAUTHENTICATED=${ALLOW_UNAUTHENTICATED:-false}
+    # セキュリティ: 本番環境ではポート公開を削除し、内部ネットワークのみでアクセス
+    # 開発環境のみポートを公開する場合は以下をコメントアウト解除
+    ports:
+      - "8888:8888"
+```
+
+**文書化の階層**:
+1. **インラインコメント**: docker-compose.yml内に具体的な設定方法
+2. **READMEファイル**: 使用方法とベストプラクティス
+3. **実装計画**: 設計判断と背景
+4. **セキュリティガイド**: 脅威モデルと対策
+
+**環境別設定の管理**:
+```bash
+# 開発環境: docker-compose.override.yml
+services:
+  health-api:
+    ports:
+      - "8888:8888"
+    environment:
+      - ALLOW_UNAUTHENTICATED=true
+
+# 本番環境: docker-compose.prod.yml
+services:
+  health-api:
+    # portsは定義しない（内部ネットワークのみ）
+    environment:
+      - HEALTH_API_TOKEN=${HEALTH_API_TOKEN}
+      - ALLOW_UNAUTHENTICATED=false
+```
+
+**チェックリスト形式の文書化**:
+```markdown
+## 本番環境デプロイ前チェックリスト
+
+### セキュリティ
+- [ ] `HEALTH_API_TOKEN`を安全な値に設定
+- [ ] `ALLOW_UNAUTHENTICATED=false`を確認
+- [ ] `ports: 8888:8888`をコメントアウト
+- [ ] ファイアウォールルールを設定
+
+### 動作確認
+- [ ] 内部ネットワークからアクセス可能
+- [ ] 外部からアクセス不可能を確認
+- [ ] 認証なしアクセスが拒否されることを確認
+```
+
+**参照**: PR #48（Gemini 3回目レビュー - Documentation）
+
+---
+
+## Gemini 3回目レビューの総括（PR #48）
+
+### レビュー概要
+
+**評価**: 引き続き"Comprehensive and well-thought-out implementation"だが、細かいセキュリティ・パフォーマンス改善点あり
+
+### 対応サマリー
+
+| # | 問題 | 分類 | 対応 |
+|---|------|------|------|
+| 1 | Fail-Open設計 | 🔴 Security | Fail-Closed原則、hmac.compare_digest使用 |
+| 2 | ポート公開 | 🔴 Security | 本番環境での削除を文書化 |
+| 3 | curl非効率 | 🟢 Performance | 1回のcurlで両方取得 |
+| 4 | 文書化不足 | 📚 Documentation | インラインコメント追加 |
+
+### セキュリティ設計の進化
+
+**1回目レビュー後**: 基本的なセキュリティ（コマンドインジェクション、情報漏洩対策）
+
+**2回目レビュー後**: 多層防御（認証、DoS対策、非rootユーザー）
+
+**3回目レビュー後**: Fail-Closed原則、タイミング攻撃対策、ネットワーク分離
+
+### 継続的改善の重要性
+
+Geminiの3回のレビューを通じて：
+1. **基本的な脆弱性**: コマンドインジェクション、情報漏洩
+2. **設計レベルの問題**: 認証欠如、DoS脆弱性
+3. **細部の最適化**: Fail-Closed原則、タイミング攻撃、パフォーマンス
+
+各レビューサイクルで段階的に品質とセキュリティが向上。
+
+### 最終セキュリティチェックリスト
+
+実装完了前の確認項目:
+
+**認証・認可（Fail-Closed原則）**:
+- [ ] API認証トークンが未設定の場合、サーバーが起動しないか？
+- [ ] `ALLOW_UNAUTHENTICATED`が明示的に`true`の場合のみ起動するか？
+- [ ] `hmac.compare_digest()`でタイミング攻撃対策しているか？
+
+**ネットワーク分離**:
+- [ ] 本番環境で外部ポート公開を削除したか？
+- [ ] 内部ネットワークのみでアクセス可能か？
+- [ ] ファイアウォールルールを設定したか？
+
+**情報漏洩対策**:
+- [ ] エラーメッセージに内部情報を含んでいないか？
+- [ ] Dockerソケットアクセスのリスクを文書化したか？
+
+**DoS対策**:
+- [ ] マルチスレッド対応（ThreadingHTTPServer）か？
+- [ ] タイムアウトが適切に設定されているか？
+
+**コンテナセキュリティ**:
+- [ ] 非rootユーザーで実行しているか？
+- [ ] 不要なパッケージが含まれていないか？
+
+**パフォーマンス**:
+- [ ] curl呼び出しが最適化されているか？
+- [ ] 不要なネットワーク往復を削減したか？
+
+**ドキュメント**:
+- [ ] 本番環境設定が文書化されているか？
+- [ ] セキュリティリスクが明記されているか？
+- [ ] チェックリストが提供されているか？
+
+---
+

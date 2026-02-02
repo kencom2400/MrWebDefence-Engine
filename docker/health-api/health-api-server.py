@@ -10,6 +10,8 @@ from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 import os
 import logging
+import hmac
+import sys
 
 # ロギング設定
 logging.basicConfig(
@@ -22,23 +24,33 @@ PORT = int(os.environ.get('HEALTH_API_PORT', '8888'))
 HEALTH_CHECK_SCRIPT = '/app/scripts/health-check.sh'
 
 # セキュリティ: API認証トークン（環境変数から取得）
-# 設定されていない場合は警告を出すが、開発環境では動作可能
+# Fail-Closed原則: トークンが設定されていない場合は起動しない
 API_TOKEN = os.environ.get('HEALTH_API_TOKEN', '')
+ALLOW_UNAUTHENTICATED = os.environ.get('ALLOW_UNAUTHENTICATED', 'false').lower() == 'true'
+
 if not API_TOKEN:
-    logger.warning("⚠️  HEALTH_API_TOKEN が設定されていません。本番環境では必ず設定してください。")
+    if ALLOW_UNAUTHENTICATED:
+        logger.warning("⚠️  HEALTH_API_TOKEN が設定されていません。開発環境専用モードで起動します。")
+        logger.warning("⚠️  本番環境では ALLOW_UNAUTHENTICATED=false にして必ずトークンを設定してください。")
+    else:
+        logger.error("❌ エラー: HEALTH_API_TOKEN が設定されていません。")
+        logger.error("開発環境で認証なしで起動する場合は ALLOW_UNAUTHENTICATED=true を設定してください。")
+        sys.exit(1)
 
 class HealthAPIHandler(BaseHTTPRequestHandler):
     def _check_authentication(self):
-        """API認証をチェック"""
+        """API認証をチェック（タイミング攻撃対策付き）"""
         if not API_TOKEN:
             # トークンが設定されていない場合は認証をスキップ（開発環境用）
+            # ALLOW_UNAUTHENTICATED=true の場合のみここに到達
             return True
         
         # Authorization ヘッダーをチェック
         auth_header = self.headers.get('Authorization', '')
         if auth_header.startswith('Bearer '):
             token = auth_header[7:]  # 'Bearer ' を除去
-            if token == API_TOKEN:
+            # タイミング攻撃対策: hmac.compare_digest() を使用
+            if hmac.compare_digest(token, API_TOKEN):
                 return True
         
         return False
@@ -149,8 +161,8 @@ def run_server():
     
     if API_TOKEN:
         logger.info(f"  🔒 API認証: 有効")
-    else:
-        logger.warning(f"  ⚠️  API認証: 無効（開発環境のみ）")
+    elif ALLOW_UNAUTHENTICATED:
+        logger.warning(f"  ⚠️  API認証: 無効（開発環境専用モード）")
     
     try:
         server.serve_forever()

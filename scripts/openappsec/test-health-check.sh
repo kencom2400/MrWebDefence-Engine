@@ -33,12 +33,14 @@ echo ""
 
 # 簡易ヘルスチェックエンドポイントのテスト
 echo -e "${BLUE}📋 2. 簡易ヘルスチェックエンドポイント (/health)${NC}"
-response=$(curl -s http://localhost:8888/health)
-http_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8888/health)
+# 効率化: 1回のcurlでレスポンスとHTTPコードを取得
+response=$(curl -s -w "\n%{http_code}" http://localhost:8888/health)
+http_code=$(echo "$response" | tail -n1)
+body=$(echo "$response" | sed '$d')
 
 if [ "$http_code" = "200" ]; then
     echo -e "${GREEN}✅ HTTPステータスコード: 200 OK${NC}"
-    echo "レスポンス: $response"
+    echo "レスポンス: $body"
 else
     echo -e "${RED}❌ HTTPステータスコード: $http_code${NC}"
     exit 1
@@ -47,9 +49,11 @@ echo ""
 
 # 詳細ヘルスチェックエンドポイントのテスト
 echo -e "${BLUE}📋 3. 詳細ヘルスチェックエンドポイント (/engine/v1/health)${NC}"
-response=$(curl -s http://localhost:8888/engine/v1/health)
-http_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8888/engine/v1/health)
-status=$(echo "$response" | jq -r '.status')
+# 効率化: 1回のcurlでレスポンスとHTTPコードを取得
+response=$(curl -s -w "\n%{http_code}" http://localhost:8888/engine/v1/health)
+http_code=$(echo "$response" | tail -n1)
+body=$(echo "$response" | sed '$d')
+status=$(echo "$body" | jq -r '.status')
 
 echo "全体ステータス: $status"
 echo "HTTPステータスコード: $http_code"
@@ -66,23 +70,23 @@ echo ""
 
 # コンポーネント状態の確認
 echo -e "${BLUE}📋 4. コンポーネント状態の詳細${NC}"
-echo "$response" | jq -r '.components | to_entries[] | "\(.key): \(.value)"'
+echo "$body" | jq -r '.components | to_entries[] | "\(.key): \(.value)"'
 echo ""
 
 # エラーメッセージの確認
 echo -e "${BLUE}📋 5. エラーメッセージ${NC}"
-errors=$(echo "$response" | jq -r '.errors')
+errors=$(echo "$body" | jq -r '.errors')
 if [ "$errors" = "[]" ]; then
     echo -e "${GREEN}✅ エラーなし${NC}"
 else
     echo -e "${YELLOW}⚠️  以下のエラーが検出されました:${NC}"
-    echo "$response" | jq -r '.errors[] | "  - \(.component): \(.message)"'
+    echo "$body" | jq -r '.errors[] | "  - \(.component): \(.message)"'
 fi
 echo ""
 
 # システム情報の確認
 echo -e "${BLUE}📋 6. システム情報${NC}"
-echo "$response" | jq -r '.system_info | to_entries[] | "\(.key): \(.value)"'
+echo "$body" | jq -r '.system_info | to_entries[] | "\(.key): \(.value)"'
 echo ""
 
 # 異常系テスト（オプション）
@@ -93,9 +97,11 @@ if [ "${TEST_ERROR_CASES:-false}" = "true" ]; then
     docker-compose -f "${DOCKER_DIR}/docker-compose.yml" stop redis
     sleep 2
     
-    response=$(curl -s http://localhost:8888/engine/v1/health)
-    http_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8888/engine/v1/health)
-    status=$(echo "$response" | jq -r '.status')
+    # 効率化: 1回のcurlでレスポンスとHTTPコードを取得
+    response=$(curl -s -w "\n%{http_code}" http://localhost:8888/engine/v1/health)
+    http_code=$(echo "$response" | tail -n1)
+    body=$(echo "$response" | sed '$d')
+    status=$(echo "$body" | jq -r '.status')
     
     echo "Redis停止時のステータス: $status"
     echo "HTTPステータスコード: $http_code"
@@ -109,7 +115,7 @@ if [ "${TEST_ERROR_CASES:-false}" = "true" ]; then
     echo -e "${GREEN}✅ Redis停止時に全体ステータスがunhealthy (503) になりました${NC}"
     
     # アサーション: Redisコンポーネントの状態検証
-    redis_status=$(echo "$response" | jq -r '.components.redis')
+    redis_status=$(echo "$body" | jq -r '.components.redis')
     if [ "$redis_status" = "unhealthy" ]; then
         echo -e "${GREEN}✅ Redis異常が正しく検知されました${NC}"
     else
