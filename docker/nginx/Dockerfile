@@ -25,33 +25,29 @@ RUN apk add --no-cache \
     automake \
     libtool
 
-# libmaxminddbのビルドとインストール
+# libmaxminddb、GeoIP2モジュール、Nginxのビルド（1つのRUNステップで実行）
 RUN cd /tmp && \
+    # libmaxminddbのビルドとインストール
     wget https://github.com/maxmind/libmaxminddb/releases/download/${MAXMINDDB_VERSION}/libmaxminddb-${MAXMINDDB_VERSION}.tar.gz && \
     tar -xzf libmaxminddb-${MAXMINDDB_VERSION}.tar.gz && \
     cd libmaxminddb-${MAXMINDDB_VERSION} && \
     ./configure && \
     make && \
     make install && \
-    echo "/usr/local/lib" >> /etc/ld-musl-x86_64.path && \
     cd /tmp && \
-    rm -rf libmaxminddb-${MAXMINDDB_VERSION}*
-
-# ngx_http_geoip2_moduleのダウンロード
-RUN cd /tmp && \
+    rm -rf libmaxminddb-${MAXMINDDB_VERSION}* && \
+    \
+    # ngx_http_geoip2_moduleのダウンロード
     wget https://github.com/leev/ngx_http_geoip2_module/archive/${GEOIP2_MODULE_VERSION}.tar.gz && \
     tar -xzf ${GEOIP2_MODULE_VERSION}.tar.gz && \
-    mv ngx_http_geoip2_module-${GEOIP2_MODULE_VERSION} /tmp/ngx_http_geoip2_module
-
-# Nginxソースコードのダウンロード
-RUN cd /tmp && \
+    mv ngx_http_geoip2_module-${GEOIP2_MODULE_VERSION} /tmp/ngx_http_geoip2_module && \
+    \
+    # Nginxソースコードのダウンロード
     wget http://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz && \
-    tar -xzf nginx-${NGINX_VERSION}.tar.gz
-
-# 動的モジュールとしてngx_http_geoip2_moduleをビルド
-# 注意: 既存のNginxバイナリと同じ configure オプションを使用する必要がある
-RUN cd /tmp/nginx-${NGINX_VERSION} && \
-    # 既存のNginxのconfigureオプションを取得（nginx -Vで確認可能）
+    tar -xzf nginx-${NGINX_VERSION}.tar.gz && \
+    \
+    # 動的モジュールとしてngx_http_geoip2_moduleをビルド
+    cd /tmp/nginx-${NGINX_VERSION} && \
     ./configure \
     --prefix=/etc/nginx \
     --sbin-path=/usr/sbin/nginx \
@@ -95,8 +91,11 @@ RUN cd /tmp/nginx-${NGINX_VERSION} && \
     --add-dynamic-module=/tmp/ngx_http_geoip2_module && \
     make modules && \
     cp objs/ngx_http_geoip2_module.so /usr/lib/nginx/modules/ && \
+    \
+    # クリーンアップとライブラリパス設定
     cd /tmp && \
-    rm -rf nginx-${NGINX_VERSION}*
+    rm -rf nginx-${NGINX_VERSION}* ${GEOIP2_MODULE_VERSION}.tar.gz && \
+    echo "/usr/local/lib" >> /etc/ld-musl-x86_64.path
 
 # クリーンアップ
 RUN apk del \
