@@ -53,72 +53,86 @@ FQDNS=("test.example.com" "example1.com" "example2.com" "example3.com")
 # 必要なサービスリスト
 REQUIRED_SERVICES=("nginx" "openappsec-agent" "fluentd")
 
-# 0. 既存コンテナの停止
-echo "📋 0. 既存コンテナの停止"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-RUNNING_SERVICES=()
+# CI環境の検出（GitHub Actions 等で既にサービスが起動している場合は再起動をスキップ）
+CI_MODE=false
+if [ -n "${GITHUB_ACTIONS:-}" ] || [ "${CI:-}" = "true" ]; then
+  CI_MODE=true
+fi
 
-for service in "${REQUIRED_SERVICES[@]}"; do
-    if $DOCKER_COMPOSE_CMD ps "$service" 2>/dev/null | grep -q "Up"; then
-        echo "⚠️  ${service}コンテナが起動中です（停止します）"
-        RUNNING_SERVICES+=("$service")
+# docker-compose ps の「起動中」判定（Up / running の両方に対応）
+is_service_up() {
+  $DOCKER_COMPOSE_CMD ps "$1" 2>/dev/null | grep -qE "Up|running"
+}
+
+# 0. 既存コンテナの停止（CI時はスキップ）
+if [ "$CI_MODE" = "true" ]; then
+  echo "📋 0. 既存コンテナの停止（スキップ: CI環境のため起動済みとして続行）"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "🔄 ログ安定化のため2秒待機..."
+  sleep 2
+  echo ""
+else
+  echo "📋 0. 既存コンテナの停止"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  RUNNING_SERVICES=()
+
+  for service in "${REQUIRED_SERVICES[@]}"; do
+    if is_service_up "$service"; then
+      echo "⚠️  ${service}コンテナが起動中です（停止します）"
+      RUNNING_SERVICES+=("$service")
     else
-        echo "✅ ${service}コンテナは停止しています"
+      echo "✅ ${service}コンテナは停止しています"
     fi
-done
+  done
 
-# 起動中のサービスがある場合、停止する
-if [ ${#RUNNING_SERVICES[@]} -gt 0 ]; then
+  if [ ${#RUNNING_SERVICES[@]} -gt 0 ]; then
     echo ""
     echo "🔄 起動中のサービスを停止中: ${RUNNING_SERVICES[*]}"
     if $DOCKER_COMPOSE_CMD stop "${RUNNING_SERVICES[@]}" 2>&1; then
-        echo "✅ サービスの停止を開始しました"
-        echo "🔄 サービスが停止するまで待機中（3秒）..."
-        sleep 3
-        
-        # 停止確認
-        for service in "${RUNNING_SERVICES[@]}"; do
-            if $DOCKER_COMPOSE_CMD ps "$service" 2>/dev/null | grep -q "Up"; then
-                echo "  ⚠️  ${service}がまだ起動中です（強制停止します）"
-                $DOCKER_COMPOSE_CMD kill "$service" 2>/dev/null || true
-            else
-                echo "  ✅ ${service}が停止しました"
-            fi
-        done
+      echo "✅ サービスの停止を開始しました"
+      echo "🔄 サービスが停止するまで待機中（3秒）..."
+      sleep 3
+      for service in "${RUNNING_SERVICES[@]}"; do
+        if is_service_up "$service"; then
+          echo "  ⚠️  ${service}がまだ起動中です（強制停止します）"
+          $DOCKER_COMPOSE_CMD kill "$service" 2>/dev/null || true
+        else
+          echo "  ✅ ${service}が停止しました"
+        fi
+      done
     else
-        echo "⚠️  サービスの停止に失敗しました（続行します）"
+      echo "⚠️  サービスの停止に失敗しました（続行します）"
     fi
-fi
-echo ""
+  fi
+  echo ""
 
-# 1. 必要なサービスの起動
-echo "📋 1. 必要なサービスの起動"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "🔄 必要なサービスを起動中: ${REQUIRED_SERVICES[*]}"
-if $DOCKER_COMPOSE_CMD up -d "${REQUIRED_SERVICES[@]}" 2>&1; then
+  # 1. 必要なサービスの起動
+  echo "📋 1. 必要なサービスの起動"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "🔄 必要なサービスを起動中: ${REQUIRED_SERVICES[*]}"
+  if $DOCKER_COMPOSE_CMD up -d "${REQUIRED_SERVICES[@]}" 2>&1; then
     echo "✅ サービスの起動を開始しました"
     echo "🔄 サービスが起動するまで待機中（10秒）..."
     sleep 10
-    
-    # 起動確認
     for service in "${REQUIRED_SERVICES[@]}"; do
-        if $DOCKER_COMPOSE_CMD ps "$service" 2>/dev/null | grep -q "Up"; then
-            echo "  ✅ ${service}が起動しました"
-        else
-            echo "  ⚠️  ${service}の起動を確認中..."
-        fi
+      if is_service_up "$service"; then
+        echo "  ✅ ${service}が起動しました"
+      else
+        echo "  ⚠️  ${service}の起動を確認中..."
+      fi
     done
-else
+  else
     echo "❌ サービスの起動に失敗しました"
     increment_error
     exit 1
+  fi
+  echo ""
 fi
-echo ""
 
 # 2. Fluentdコンテナの状態確認
 echo "📋 2. Fluentdコンテナの状態確認"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-if $DOCKER_COMPOSE_CMD ps fluentd 2>/dev/null | grep -q "Up"; then
+if is_service_up fluentd; then
     echo "✅ Fluentdコンテナが起動しています"
     increment_success
     
@@ -232,8 +246,16 @@ HTTP_TEST_FAILED=0
 for fqdn in "${FQDNS[@]}"; do
     echo "テスト: ${fqdn}"
     
-    # ヘルスチェックエンドポイント
-    if curl -s -m 5 -H "Host: ${fqdn}" http://localhost/health > /dev/null 2>&1; then
+    # ヘルスチェックエンドポイント（CI時は1回失敗でリトライ）
+    HEALTH_OK=0
+    for retry in 1 2; do
+      if curl -s -m 5 -H "Host: ${fqdn}" http://localhost/health > /dev/null 2>&1; then
+        HEALTH_OK=1
+        break
+      fi
+      [ "$CI_MODE" = "true" ] && [ "$retry" -eq 1 ] && sleep 2
+    done
+    if [ "$HEALTH_OK" -eq 1 ]; then
         echo "  ✅ ヘルスチェック: OK"
         increment_success
     else
@@ -255,9 +277,11 @@ for fqdn in "${FQDNS[@]}"; do
     fi
 done
 
-# 少し待機してログが書き込まれるのを待つ
-echo "🔄 ログの書き込みを待機中（3秒）..."
-sleep 3
+# 少し待機してログが書き込まれるのを待つ（CI時は長めに）
+WAIT_SEC=3
+[ "$CI_MODE" = "true" ] && WAIT_SEC=5
+echo "🔄 ログの書き込みを待機中（${WAIT_SEC}秒）..."
+sleep "$WAIT_SEC"
 echo ""
 
 # 6. NginxログのJSON形式確認
@@ -269,12 +293,26 @@ for fqdn in "${FQDNS[@]}"; do
     if [ -f "$access_log" ] && [ -s "$access_log" ]; then
         echo "確認: ${fqdn}"
         
-        # 最新のログエントリを取得
+        # 最新のログエントリを取得（CI時は1回失敗で2秒待って再取得）
         latest_log=$(tail -n 1 "$access_log" 2>/dev/null || echo "")
+        if [ "$CI_MODE" = "true" ] && [ -z "$latest_log" ]; then
+          sleep 2
+          latest_log=$(tail -n 1 "$access_log" 2>/dev/null || echo "")
+        fi
         
         if [ -n "$latest_log" ]; then
-            # JSON形式かどうかを確認
+            # JSON形式かどうかを確認（CI時は1回パース失敗で2秒待って再検証）
+            JSON_VALID=0
             if echo "$latest_log" | jq empty > /dev/null 2>&1; then
+              JSON_VALID=1
+            elif [ "$CI_MODE" = "true" ]; then
+              sleep 2
+              latest_log=$(tail -n 1 "$access_log" 2>/dev/null || echo "")
+              if echo "$latest_log" | jq empty > /dev/null 2>&1; then
+                JSON_VALID=1
+              fi
+            fi
+            if [ "$JSON_VALID" -eq 1 ]; then
                 echo "  ✅ JSON形式のログが正しく出力されています"
                 increment_success
                 

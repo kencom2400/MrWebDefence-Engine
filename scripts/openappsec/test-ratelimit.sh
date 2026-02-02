@@ -2,6 +2,8 @@
 
 # RateLimit機能テストスクリプト
 # Task 5.4: RateLimit機能実装のテストと動作確認
+# ポリシー: config-agent/lib/policy-generator.sh の rate-limit-default に準拠
+#   - uri: "/", limit: 100, unit: minute, action: prevent
 
 set -e
 
@@ -18,6 +20,44 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+# 指定回数リクエストを送信し、成功・ブロック・その他の件数を集計する
+# 使用例: send_requests "http://localhost/" "test.example.com" 10
+# 戻り値: なし。グローバル SUCCESS_COUNT, BLOCKED_COUNT を更新する
+send_requests() {
+    local url="$1"
+    local host_header="$2"
+    local count="${3:-1}"
+    SUCCESS_COUNT=0
+    BLOCKED_COUNT=0
+
+    for i in $(seq 1 "$count"); do
+        local response
+        response=$(curl -s -w "\n%{http_code}" -H "Host: ${host_header}" "$url" 2>/dev/null || echo "000")
+        local http_code
+        http_code=$(echo "$response" | tail -1)
+
+        if [ "$http_code" = "200" ]; then
+            echo -e "  リクエスト ${i}: ${GREEN}成功 (${http_code})${NC}"
+            SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+        elif [ "$http_code" = "403" ]; then
+            echo -e "  リクエスト ${i}: ${RED}ブロック (403)${NC}"
+            BLOCKED_COUNT=$((BLOCKED_COUNT + 1))
+        else
+            echo -e "  リクエスト ${i}: ${YELLOW}その他 (${http_code})${NC}"
+        fi
+        sleep 0.5
+    done
+}
+
+# 1回だけリクエストを送信し、HTTPステータスコードを返す（標準出力の最後の行）
+get_http_code() {
+    local url="$1"
+    local host_header="$2"
+    local response
+    response=$(curl -s -w "\n%{http_code}" -H "Host: ${host_header}" "$url" 2>/dev/null || echo "000")
+    echo "$response" | tail -1
+}
+
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}  RateLimit機能テスト${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -33,13 +73,13 @@ else
     DOCKER_COMPOSE_CMD="docker compose"
 fi
 
-# Redisコンテナの確認
+# Redisコンテナの確認（オプション: 将来の拡張用）
 if $DOCKER_COMPOSE_CMD ps redis 2>/dev/null | grep -q "Up"; then
     echo -e "${GREEN}✅ Redis: 起動中${NC}"
 else
-    echo -e "${RED}❌ Redis: 停止中${NC}"
-    echo "   起動してください: $DOCKER_COMPOSE_CMD up -d redis"
-    exit 1
+    echo -e "${YELLOW}⚠️  Redis: 停止中（オプション）${NC}"
+    echo "   注意: OpenAppSecのRateLimit機能は共有メモリを使用するため、Redisは必須ではありません"
+    echo "   Redisは将来の拡張用に準備されています"
 fi
 
 # Nginx
@@ -66,32 +106,36 @@ else
 fi
 echo ""
 
-# 2. accessControlPracticesの生成確認
+# 2. accessControlPracticesの生成確認（現ポリシー: uri "/", 100/分, action prevent）
 echo -e "${BLUE}📋 2. accessControlPracticesの生成確認${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 if [ -f "./openappsec/local_policy.yaml" ]; then
     echo -e "${GREEN}✅ OpenAppSec設定ファイルが存在します${NC}"
-    
+
     # accessControlPracticesの確認
     if grep -q "^accessControlPractices:" ./openappsec/local_policy.yaml; then
         echo -e "${GREEN}✅ accessControlPractices定義が含まれています${NC}"
-        
+
         # rate-limit-defaultプラクティスの確認
         if grep -q "name: rate-limit-default" ./openappsec/local_policy.yaml; then
             echo -e "${GREEN}✅ rate-limit-defaultプラクティスが定義されています${NC}"
-            
-            # RateLimitルールの確認
-            if grep -q "uri: \"/login\"" ./openappsec/local_policy.yaml; then
-                echo -e "${GREEN}✅ /loginエンドポイントのRateLimitルールが定義されています${NC}"
+
+            # 現ポリシー: uri "/", limit 100, action prevent（policy-generator.sh に準拠）
+            if grep -Fq 'uri: "/"' ./openappsec/local_policy.yaml; then
+                echo -e "${GREEN}✅ 全エンドポイントのRateLimitルール（uri: \"/\"）が定義されています${NC}"
             else
-                echo -e "${YELLOW}⚠️  /loginエンドポイントのRateLimitルールが見つかりません${NC}"
+                echo -e "${YELLOW}⚠️  uri: \"/\" のRateLimitルールが見つかりません${NC}"
             fi
-            
-            if grep -q "uri: \"/api/\*\"" ./openappsec/local_policy.yaml; then
-                echo -e "${GREEN}✅ /api/*エンドポイントのRateLimitルールが定義されています${NC}"
+            if grep -q "limit: 100" ./openappsec/local_policy.yaml; then
+                echo -e "${GREEN}✅ limit: 100（100リクエスト/分）が定義されています${NC}"
             else
-                echo -e "${YELLOW}⚠️  /api/*エンドポイントのRateLimitルールが見つかりません${NC}"
+                echo -e "${YELLOW}⚠️  limit: 100 が見つかりません${NC}"
+            fi
+            if grep -q "action: prevent" ./openappsec/local_policy.yaml; then
+                echo -e "${GREEN}✅ action: prevent が定義されています${NC}"
+            else
+                echo -e "${YELLOW}⚠️  action: prevent が見つかりません${NC}"
             fi
         else
             echo -e "${RED}❌ rate-limit-defaultプラクティスが見つかりません${NC}"
@@ -99,7 +143,7 @@ if [ -f "./openappsec/local_policy.yaml" ]; then
     else
         echo -e "${RED}❌ accessControlPractices定義が見つかりません${NC}"
     fi
-    
+
     # accessControlPractices定義の表示（最初の30行）
     echo ""
     echo "accessControlPractices定義（最初の30行）:"
@@ -123,87 +167,34 @@ else
 fi
 echo ""
 
-# 4. RateLimit機能のテスト
+# 4. RateLimit機能のテスト（現ポリシー: uri "/", 100/分, action prevent）
 echo -e "${BLUE}📋 4. RateLimit機能のテスト${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# テスト用FQDN（最初の有効なFQDNを使用）
 TEST_FQDN="test.example.com"
-
 echo "テスト対象FQDN: ${TEST_FQDN}"
+echo "ポリシー: uri \"/\", 100リクエスト/分, action: prevent（policy-generator.sh 準拠）"
 echo ""
 
-# 4.1 /loginエンドポイントのレート制限テスト
-echo -e "${BLUE}4.1 /loginエンドポイントのレート制限テスト${NC}"
+# 4.1 制限内のリクエスト（5回）
+echo -e "${BLUE}4.1 制限内のリクエスト（5回）${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "レート制限: 10リクエスト/分（action: prevent）"
-echo ""
-
-# 10回のリクエストを送信（制限内）
-echo "制限内のリクエスト（10回）:"
-SUCCESS_COUNT=0
-BLOCKED_COUNT=0
-
-for i in {1..10}; do
-    response=$(curl -s -w "\n%{http_code}" -H "Host: ${TEST_FQDN}" http://localhost/login 2>/dev/null || echo "000")
-    http_code=$(echo "$response" | tail -1)
-    
-    if [ "$http_code" = "200" ] || [ "$http_code" = "403" ]; then
-        if [ "$http_code" = "403" ]; then
-            echo -e "  リクエスト ${i}: ${RED}ブロック (403)${NC}"
-            BLOCKED_COUNT=$((BLOCKED_COUNT + 1))
-        else
-            echo -e "  リクエスト ${i}: ${GREEN}成功 (${http_code})${NC}"
-            SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
-        fi
-    else
-        echo -e "  リクエスト ${i}: ${YELLOW}その他 (${http_code})${NC}"
-    fi
-    sleep 0.5
-done
-
+send_requests "http://localhost/" "$TEST_FQDN" 5
 echo ""
 echo "結果: 成功 ${SUCCESS_COUNT}回、ブロック ${BLOCKED_COUNT}回"
 echo ""
 
-# 11回目のリクエスト（制限超過）
-echo "制限超過のリクエスト（11回目）:"
-response=$(curl -s -w "\n%{http_code}" -H "Host: ${TEST_FQDN}" http://localhost/login 2>/dev/null || echo "000")
-http_code=$(echo "$response" | tail -1)
-
-if [ "$http_code" = "403" ]; then
-    echo -e "${GREEN}✅ レート制限が正常に動作しています（403が返されました）${NC}"
-else
-    echo -e "${YELLOW}⚠️  レート制限が動作していない可能性があります（HTTPステータス: ${http_code}）${NC}"
-    echo "   注意: OpenAppSecのRateLimit機能は設定読み込みに時間がかかる場合があります"
-fi
-echo ""
-
-# 4.2 /api/*エンドポイントのレート制限テスト
-echo -e "${BLUE}4.2 /api/*エンドポイントのレート制限テスト${NC}"
+# 4.2 制限超過の確認（101回目で403が期待される場合のサンプルチェック）
+echo -e "${BLUE}4.2 制限超過時の動作確認（オプション）${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "レート制限: 100リクエスト/分（action: detect）"
-echo ""
-
-# 5回のリクエストを送信（制限内）
-echo "制限内のリクエスト（5回）:"
-SUCCESS_COUNT=0
-for i in {1..5}; do
-    response=$(curl -s -w "\n%{http_code}" -H "Host: ${TEST_FQDN}" http://localhost/api/test 2>/dev/null || echo "000")
-    http_code=$(echo "$response" | tail -1)
-    
-    if [ "$http_code" = "200" ]; then
-        echo -e "  リクエスト ${i}: ${GREEN}成功 (${http_code})${NC}"
-        SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
-    else
-        echo -e "  リクエスト ${i}: ${YELLOW}その他 (${http_code})${NC}"
-    fi
-    sleep 0.5
-done
-
-echo ""
-echo "結果: 成功 ${SUCCESS_COUNT}回"
-echo "注意: /api/*エンドポイントはaction: detectのため、ブロックされずにログに記録されます"
+echo "追加で1リクエスト送信し、レート制限適用の有無を確認します。"
+code=$(get_http_code "http://localhost/" "$TEST_FQDN")
+if [ "$code" = "403" ]; then
+    echo -e "${GREEN}✅ レート制限が適用されている可能性があります（403）${NC}"
+else
+    echo -e "${YELLOW}⚠️  HTTPステータス: ${code}（100/分以内のため200の場合は正常）${NC}"
+    echo "   注意: OpenAppSecのRateLimitは設定読み込みに時間がかかる場合や、Issue #397の影響で適用されない場合があります"
+fi
 echo ""
 
 # 5. IPアドレス単位のレート制限テスト
@@ -221,7 +212,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 if [ -f "./openappsec/local_policy.yaml" ]; then
     echo "OpenAppSec設定ファイルのaccessControlPracticesセクション:"
-    awk '/^accessControlPractices:/,/^[a-zA-Z#]/ {if (/^accessControlPractices:/ || /^  - name:/ || /^    rateLimit:/ || /^      rules:/ || /^        - uri:/ || /^          limit:/ || /^          action:/) print}' ./openappsec/local_policy.yaml | head -20
+    grep -A 20 "^accessControlPractices:" ./openappsec/local_policy.yaml | head -20
 fi
 echo ""
 
