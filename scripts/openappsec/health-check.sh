@@ -122,7 +122,8 @@ check_fluentd() {
 get_system_info() {
     local nginx_version
     
-    nginx_version=$(docker-compose exec -T nginx nginx -v 2>&1 | grep -oP 'nginx/\K[0-9.]+' || echo "unknown")
+    # BusyBox互換のコマンドを使用（grep -Pは使えない）
+    nginx_version=$(docker-compose exec -T nginx nginx -v 2>&1 | grep -o 'nginx/[0-9.]*' | cut -d'/' -f2 || echo "unknown")
     
     # jqを使って安全にJSONを生成（特殊文字のエスケープに対応）
     jq -n \
@@ -139,21 +140,21 @@ check_config_agent
 check_redis
 check_fluentd
 
+# 全体ステータスの判定（両方の出力モードで共通）
+# 必須コンポーネント: nginx, openappsec-agent, redis
+overall_status="healthy"
+if [ "${health_status[nginx]}" != "healthy" ] || \
+   [ "${health_status[openappsec-agent]}" != "healthy" ] || \
+   [ "${health_status[redis]}" != "healthy" ] || \
+   [ "${health_status[redis_connection]}" = "failed" ]; then
+    overall_status="unhealthy"
+fi
+
 # 結果の出力
 if [ "$output_json" = true ]; then
     # JSON形式で出力（jqを使用して安全に生成）
     # システム情報を取得
     system_info=$(get_system_info)
-    
-    # 全体ステータスの判定
-    # 必須コンポーネント: nginx, openappsec-agent, redis
-    overall_status="healthy"
-    if [ "${health_status[nginx]}" != "healthy" ] || \
-       [ "${health_status[openappsec-agent]}" != "healthy" ] || \
-       [ "${health_status[redis]}" != "healthy" ] || \
-       [ "${health_status[redis_connection]}" = "failed" ]; then
-        overall_status="unhealthy"
-    fi
     
     # エラーメッセージの配列を作成
     errors_json="[]"
@@ -237,9 +238,8 @@ else
         echo ""
     fi
     
-    # 全体のステータス
-    if [ "${health_status[nginx]}" = "healthy" ] && \
-       [ "${health_status[openappsec-agent]}" = "healthy" ]; then
+    # 全体のステータス（JSON出力と同じロジック）
+    if [ "$overall_status" = "healthy" ]; then
         echo "✅ 全体ステータス: 正常"
         exit 0
     else

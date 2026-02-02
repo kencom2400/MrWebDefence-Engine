@@ -3,6 +3,7 @@ FROM python:3-alpine
 WORKDIR /app
 
 # 必要なパッケージをインストール
+# docker-cliパッケージがdockerグループを作成する
 RUN apk add --no-cache \
     bash \
     docker-cli \
@@ -11,7 +12,13 @@ RUN apk add --no-cache \
     jq
 
 # セキュリティ向上のため、非rootユーザーを作成
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+# Dockerソケットへのアクセスが必要なため、dockerグループを作成してappuserを追加
+# 注意: ホストのdockerグループGID（通常999）とコンテナのdockerグループGIDを一致させる必要がある
+# docker.sockのグループIDを確認して、それに合わせてdockerグループを作成
+RUN addgroup -S appgroup && \
+    adduser -S appuser -G appgroup && \
+    addgroup docker && \
+    addgroup appuser docker
 
 # ヘルスチェックAPIサーバーをコピー
 COPY --chown=appuser:appgroup health-api-server.py /app/health-api-server.py

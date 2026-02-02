@@ -297,10 +297,11 @@ services:
       # Fail-Closed原則: トークン未設定時は起動しない（デフォルト）
       # 開発環境で認証なしで起動する場合のみ ALLOW_UNAUTHENTICATED=true を設定
       - ALLOW_UNAUTHENTICATED=${ALLOW_UNAUTHENTICATED:-false}
-    # セキュリティ: 本番環境ではポート公開を削除し、内部ネットワークのみでアクセス
-    # 開発環境のみポートを公開する場合は以下をコメントアウト解除
-    ports:
-      - "8888:8888"
+    # セキュリティ: 本番環境ではポート公開をデフォルトで無効化
+    # 内部ネットワーク経由でのみアクセス可能（他のコンテナから health-api:8888 でアクセス）
+    # 開発環境でホストからアクセスする場合は docker-compose.override.yml でポートを公開
+    # ports:
+    #   - "8888:8888"
     networks:
       - mwd-network
     depends_on:

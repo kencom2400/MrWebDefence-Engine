@@ -8,6 +8,10 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_DIR="${SCRIPT_DIR}/../../docker"
 
+# 環境変数からポート番号を取得（デフォルト: 8888）
+HEALTH_API_PORT=${HEALTH_API_PORT:-8888}
+API_BASE_URL="http://localhost:${HEALTH_API_PORT}"
+
 # 色の定義
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -34,7 +38,7 @@ echo ""
 # 簡易ヘルスチェックエンドポイントのテスト
 echo -e "${BLUE}📋 2. 簡易ヘルスチェックエンドポイント (/health)${NC}"
 # 効率化: 1回のcurlでレスポンスとHTTPコードを取得
-response=$(curl -s -w "\n%{http_code}" http://localhost:8888/health)
+response=$(curl -s -w "\n%{http_code}" ${API_BASE_URL}/health)
 http_code=$(echo "$response" | tail -n1)
 body=$(echo "$response" | sed '$d')
 
@@ -50,7 +54,7 @@ echo ""
 # 詳細ヘルスチェックエンドポイントのテスト
 echo -e "${BLUE}📋 3. 詳細ヘルスチェックエンドポイント (/engine/v1/health)${NC}"
 # 効率化: 1回のcurlでレスポンスとHTTPコードを取得
-response=$(curl -s -w "\n%{http_code}" http://localhost:8888/engine/v1/health)
+response=$(curl -s -w "\n%{http_code}" ${API_BASE_URL}/engine/v1/health)
 http_code=$(echo "$response" | tail -n1)
 body=$(echo "$response" | sed '$d')
 status=$(echo "$body" | jq -r '.status')
@@ -98,7 +102,7 @@ if [ "${TEST_ERROR_CASES:-false}" = "true" ]; then
     sleep 2
     
     # 効率化: 1回のcurlでレスポンスとHTTPコードを取得
-    response=$(curl -s -w "\n%{http_code}" http://localhost:8888/engine/v1/health)
+    response=$(curl -s -w "\n%{http_code}" ${API_BASE_URL}/engine/v1/health)
     http_code=$(echo "$response" | tail -n1)
     body=$(echo "$response" | sed '$d')
     status=$(echo "$body" | jq -r '.status')
