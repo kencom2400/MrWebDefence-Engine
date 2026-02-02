@@ -1,12 +1,12 @@
 services:
   nginx:
-    # OpenAppSec公式のNginxイメージ + GeoIP2モジュール（カスタムビルド）
+    # OpenAppSec公式のNginxイメージ（GeoIP機能は実装PR後に有効化）
     # 注意: 特定バージョンを指定することを推奨（再現性のため）
-    build:
-      context: ./nginx
-      dockerfile: Dockerfile
+    # build:
+    #   context: ./nginx
+    #   dockerfile: Dockerfile
     # 既存イメージを使用する場合（GeoIP機能なし）:
-    # image: ghcr.io/openappsec/nginx-attachment:latest
+    image: ghcr.io/openappsec/nginx-attachment:latest
     platform: linux/amd64
     container_name: mwd-nginx
     volumes:
