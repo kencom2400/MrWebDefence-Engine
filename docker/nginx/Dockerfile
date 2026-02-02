@@ -27,11 +27,11 @@ RUN apk add --no-cache \
 
 # libmaxminddb、GeoIP2モジュール、Nginxのビルド（1つのRUNステップで実行）
 RUN cd /tmp && \
-    # libmaxminddbのビルドとインストール
+    # libmaxminddbのビルドとインストール（/usrにインストール）
     wget https://github.com/maxmind/libmaxminddb/releases/download/${MAXMINDDB_VERSION}/libmaxminddb-${MAXMINDDB_VERSION}.tar.gz && \
     tar -xzf libmaxminddb-${MAXMINDDB_VERSION}.tar.gz && \
     cd libmaxminddb-${MAXMINDDB_VERSION} && \
-    ./configure && \
+    ./configure --prefix=/usr && \
     make && \
     make install && \
     cd /tmp && \
@@ -91,7 +91,7 @@ RUN cd /tmp && \
     make modules && \
     cp objs/ngx_http_geoip2_module.so /usr/lib/nginx/modules/ && \
     \
-    # クリーンアップ（ライブラリパス設定前に実行）
+    # クリーンアップ
     cd /tmp && \
     rm -rf nginx-${NGINX_VERSION}* ${GEOIP2_MODULE_VERSION}.tar.gz && \
     apk del \
@@ -100,10 +100,7 @@ RUN cd /tmp && \
     git \
     autoconf \
     automake \
-    libtool && \
-    \
-    # ライブラリパス設定（最後に実行）
-    echo "/usr/local/lib" >> /etc/ld-musl-x86_64.path
+    libtool
 
 # GeoIPデータベース用ディレクトリの作成
 RUN mkdir -p /usr/share/GeoIP && \
