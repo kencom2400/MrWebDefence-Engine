@@ -65,6 +65,188 @@ validate_backend_port() {
     fi
 }
 
+# GeoIP設定を生成
+generate_geoip_config() {
+    local fqdn_config="$1"
+    local fqdn="$2"
+    
+    # GeoIP設定が有効かチェック
+    local geoip_enabled
+    geoip_enabled=$(echo "$fqdn_config" | jq -r '.geoip.enabled // false')
+    
+    if [ "$geoip_enabled" != "true" ]; then
+        # GeoIP無効の場合は空文字列を返す
+        echo ""
+        return
+    fi
+    
+    # GeoIP設定を構築
+    local geoip_config=""
+    
+    # X-Forwarded-For設定
+    local xff_enabled
+    xff_enabled=$(echo "$fqdn_config" | jq -r '.geoip.x_forwarded_for.enabled // false')
+    
+    if [ "$xff_enabled" = "true" ]; then
+        # 信頼できるプロキシのIPレンジを取得
+        local trusted_proxies
+        trusted_proxies=$(echo "$fqdn_config" | jq -r '.geoip.x_forwarded_for.trusted_proxies[]? // empty' 2>/dev/null)
+        
+        if [ -n "$trusted_proxies" ]; then
+            geoip_config+="
+    # X-Forwarded-Forから実IPを取得
+    # 信頼できるプロキシからのX-Forwarded-Forヘッダーを使用
+"
+            while IFS= read -r proxy; do
+                geoip_config+="    set_real_ip_from $proxy;
+"
+            done <<< "$trusted_proxies"
+            
+            geoip_config+="    real_ip_header X-Forwarded-For;
+    real_ip_recursive on;
+"
+        fi
+    fi
+    
+    # IP AllowList設定
+    local ip_allowlist
+    ip_allowlist=$(echo "$fqdn_config" | jq -r '.geoip.ip_allowlist[]? // empty' 2>/dev/null)
+    
+    if [ -n "$ip_allowlist" ]; then
+        geoip_config+="
+    # IP AllowList（geoディレクティブ）
+    geo \$ip_allowlist {
+        default 0;
+"
+        while IFS= read -r ip; do
+            geoip_config+="        $ip 1;
+"
+        done <<< "$ip_allowlist"
+        
+        geoip_config+="    }
+"
+    fi
+    
+    # IP BlockList設定
+    local ip_blocklist
+    ip_blocklist=$(echo "$fqdn_config" | jq -r '.geoip.ip_blocklist[]? // empty' 2>/dev/null)
+    
+    if [ -n "$ip_blocklist" ]; then
+        geoip_config+="
+    # IP BlockList（geoディレクティブ）
+    geo \$ip_blocklist {
+        default 0;
+"
+        while IFS= read -r ip; do
+            geoip_config+="        $ip 1;
+"
+        done <<< "$ip_blocklist"
+        
+        geoip_config+="    }
+"
+    fi
+    
+    # 国コード AllowList設定
+    local country_allowlist
+    country_allowlist=$(echo "$fqdn_config" | jq -r '.geoip.country_allowlist[]? // empty' 2>/dev/null)
+    
+    if [ -n "$country_allowlist" ]; then
+        geoip_config+="
+    # 国コード AllowList（mapディレクティブ）
+    map \$geoip2_data_country_iso_code \$country_allowlist {
+        default 0;
+"
+        while IFS= read -r country; do
+            geoip_config+="        $country 1;
+"
+        done <<< "$country_allowlist"
+        
+        geoip_config+="    }
+"
+    fi
+    
+    # 国コード BlockList設定
+    local country_blocklist
+    country_blocklist=$(echo "$fqdn_config" | jq -r '.geoip.country_blocklist[]? // empty' 2>/dev/null)
+    
+    if [ -n "$country_blocklist" ]; then
+        geoip_config+="
+    # 国コード BlockList（mapディレクティブ）
+    map \$geoip2_data_country_iso_code \$country_blocklist {
+        default 0;
+"
+        while IFS= read -r country; do
+            geoip_config+="        $country 1;
+"
+        done <<< "$country_blocklist"
+        
+        geoip_config+="    }
+"
+    fi
+    
+    # アクセス制御ロジック
+    local allowlist_priority
+    allowlist_priority=$(echo "$fqdn_config" | jq -r '.geoip.allowlist_priority // true')
+    
+    if [ -n "$ip_allowlist" ] || [ -n "$country_allowlist" ] || [ -n "$ip_blocklist" ] || [ -n "$country_blocklist" ]; then
+        geoip_config+="
+    # アクセス制御ロジック
+    set \$access_allowed 1;  # デフォルトは許可
+"
+        
+        if [ "$allowlist_priority" = "true" ] && ([ -n "$ip_allowlist" ] || [ -n "$country_allowlist" ]); then
+            geoip_config+="
+    # AllowListが定義されている場合、デフォルトを拒否に変更
+"
+            if [ -n "$ip_allowlist" ]; then
+                geoip_config+="    if (\$ip_allowlist) {
+        set \$access_allowed 0;
+    }
+"
+            fi
+            if [ -n "$country_allowlist" ]; then
+                geoip_config+="    if (\$country_allowlist) {
+        set \$access_allowed 0;
+    }
+"
+            fi
+            
+            geoip_config+="
+    # IP AllowListに含まれる場合は許可
+    if (\$ip_allowlist = \"1\") {
+        set \$access_allowed 1;
+    }
+    
+    # 国コード AllowListに含まれる場合は許可
+    if (\$country_allowlist = \"1\") {
+        set \$access_allowed 1;
+    }
+"
+        fi
+        
+        # BlockList判定
+        geoip_config+="
+    # IP BlockListに含まれる場合は拒否
+    if (\$ip_blocklist = \"1\") {
+        set \$access_allowed 0;
+    }
+    
+    # 国コード BlockListに含まれる場合は拒否
+    if (\$country_blocklist = \"1\") {
+        set \$access_allowed 0;
+    }
+    
+    # アクセス拒否
+    if (\$access_allowed = \"0\") {
+        return 403 '{\"error\": \"Access denied\", \"reason\": \"GeoIP policy violation\"}';
+        add_header Content-Type application/json always;
+    }
+"
+    fi
+    
+    echo "$geoip_config"
+}
+
 # Nginx設定ファイルを生成
 generate_nginx_configs() {
     local config_data="$1"
@@ -189,6 +371,10 @@ generate_nginx_configs() {
             echo "✅ ログディレクトリを作成しました: $log_dir"
         fi
         
+        # GeoIP設定を生成
+        local geoip_config
+        geoip_config=$(generate_geoip_config "$fqdn_config" "$fqdn")
+        
         # Nginx設定ファイルを生成
         if ! cat > "$config_file" << EOF
 # FQDN設定: ${fqdn}
@@ -200,7 +386,7 @@ server {
 
     # 顧客名を変数に設定（ログフォーマットで使用）
     set \$customer_name "${customer_name}";
-
+${geoip_config}
     # アクセスログ（FQDN別ディレクトリ、JSON形式）
     # ログディレクトリを自動作成（Nginx起動時に必要）
     access_log /var/log/nginx/${fqdn}/access.log json_combined;
@@ -213,6 +399,7 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-GeoIP-Country \$geoip2_data_country_iso_code;
 
         # タイムアウト設定
         proxy_connect_timeout 60s;
