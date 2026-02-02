@@ -256,6 +256,14 @@ generate_access_decision_logic() {
         return 0
     fi
     
+    # デフォルトアクションを決定
+    # AllowListが1つでも定義されている場合は、デフォルトで拒否（ホワイトリストモード）
+    # BlockListのみの場合は、デフォルトで許可（ブラックリストモード）
+    local default_action=0
+    if [ "$has_ip_allowlist" = "true" ] || [ "$has_country_allowlist" = "true" ]; then
+        default_action=1
+    fi
+    
     cat << EOF
 
 # 最終的なアクセス許可判定（AllowList優先ロジック - アプローチ2）
@@ -283,8 +291,9 @@ map "\$${sanitized_fqdn}_ip_allowed:\$${sanitized_fqdn}_ip_blocked:\$${sanitized
     # 国コード BlockList: 拒否（AllowListがない場合のみ）
     "0:0:0:1" 1;  # 国コード BlockList のみ一致
     
-    # デフォルト: すべて不一致 → 許可（ブラックリストモード）
-    default 0;
+    # デフォルト: どのリストにも一致しない場合
+    # AllowListが存在する場合は拒否（ホワイトリストモード）、BlockListのみの場合は許可（ブラックリストモード）
+    default ${default_action};
 }
 EOF
 }
