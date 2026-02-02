@@ -6,7 +6,7 @@ WAFエンジンの各コンポーネントの状態を返すHTTP APIサーバー
 
 import json
 import subprocess
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 import os
 import logging
@@ -21,27 +21,59 @@ logger = logging.getLogger('health-api')
 PORT = int(os.environ.get('HEALTH_API_PORT', '8888'))
 HEALTH_CHECK_SCRIPT = '/app/scripts/health-check.sh'
 
+# セキュリティ: API認証トークン（環境変数から取得）
+# 設定されていない場合は警告を出すが、開発環境では動作可能
+API_TOKEN = os.environ.get('HEALTH_API_TOKEN', '')
+if not API_TOKEN:
+    logger.warning("⚠️  HEALTH_API_TOKEN が設定されていません。本番環境では必ず設定してください。")
+
 class HealthAPIHandler(BaseHTTPRequestHandler):
+    def _check_authentication(self):
+        """API認証をチェック"""
+        if not API_TOKEN:
+            # トークンが設定されていない場合は認証をスキップ（開発環境用）
+            return True
+        
+        # Authorization ヘッダーをチェック
+        auth_header = self.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:]  # 'Bearer ' を除去
+            if token == API_TOKEN:
+                return True
+        
+        return False
+    
     def do_GET(self):
         parsed_path = urlparse(self.path)
         path = parsed_path.path
         
         if path == '/engine/v1/health':
+            # セキュリティ: 認証チェック
+            if not self._check_authentication():
+                self.send_response(401)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "error": "Unauthorized",
+                    "message": "Invalid or missing authentication token"
+                }).encode('utf-8'))
+                return
+            
             self.handle_health_check()
         elif path == '/health':
             # 簡易版ヘルスチェック（200 OKのみ）
-            # Kubernetes liveness probe用
+            # Kubernetes liveness probe用（認証不要）
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps({"status": "ok"}).encode('utf-8'))
         else:
+            # セキュリティ: パス情報を漏洩させない
             self.send_response(404)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps({
-                "error": "Not Found",
-                "message": f"Path {path} not found"
+                "error": "Not Found"
             }).encode('utf-8'))
     
     def handle_health_check(self):
@@ -109,10 +141,16 @@ class HealthAPIHandler(BaseHTTPRequestHandler):
         logger.info(f"{self.address_string()} - {format % args}")
 
 def run_server():
-    server = HTTPServer(('0.0.0.0', PORT), HealthAPIHandler)
+    # セキュリティ: マルチスレッド対応でDoS攻撃を防止
+    server = ThreadingHTTPServer(('0.0.0.0', PORT), HealthAPIHandler)
     logger.info(f"✅ ヘルスチェックAPIサーバーを起動しました: http://0.0.0.0:{PORT}")
-    logger.info(f"  GET /engine/v1/health - 詳細なヘルスチェック")
-    logger.info(f"  GET /health - 簡易ヘルスチェック")
+    logger.info(f"  GET /engine/v1/health - 詳細なヘルスチェック（認証必要）")
+    logger.info(f"  GET /health - 簡易ヘルスチェック（認証不要）")
+    
+    if API_TOKEN:
+        logger.info(f"  🔒 API認証: 有効")
+    else:
+        logger.warning(f"  ⚠️  API認証: 無効（開発環境のみ）")
     
     try:
         server.serve_forever()

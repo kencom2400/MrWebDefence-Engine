@@ -100,11 +100,21 @@ if [ "${TEST_ERROR_CASES:-false}" = "true" ]; then
     echo "Redis停止時のステータス: $status"
     echo "HTTPステータスコード: $http_code"
     
+    # アサーション: 全体ステータスとHTTPコードの検証
+    if [ "$status" != "unhealthy" ] || [ "$http_code" != "503" ]; then
+        echo -e "${RED}❌ Redis停止時の全体ステータスが不正です (status: $status, http: $http_code)${NC}"
+        docker-compose -f "${DOCKER_DIR}/docker-compose.yml" start redis >/dev/null
+        exit 1
+    fi
+    echo -e "${GREEN}✅ Redis停止時に全体ステータスがunhealthy (503) になりました${NC}"
+    
+    # アサーション: Redisコンポーネントの状態検証
     redis_status=$(echo "$response" | jq -r '.components.redis')
     if [ "$redis_status" = "unhealthy" ]; then
         echo -e "${GREEN}✅ Redis異常が正しく検知されました${NC}"
     else
         echo -e "${RED}❌ Redis異常が検知されませんでした${NC}"
+        docker-compose -f "${DOCKER_DIR}/docker-compose.yml" start redis >/dev/null
         exit 1
     fi
     

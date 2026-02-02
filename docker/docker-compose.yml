@@ -278,6 +278,9 @@ services:
       # ヘルスチェックスクリプト
       - ../scripts/openappsec/health-check.sh:/app/scripts/health-check.sh:ro
       # Dockerソケット（コンテナ状態確認用）
+      # セキュリティ警告: Dockerソケットへのアクセスにより、
+      # 他のコンテナの情報（設定、メタデータ、環境変数）を読み取り可能。
+      # 本番環境では必ずHEALTH_API_TOKENを設定し、ネットワークアクセスを制限すること。
       - /var/run/docker.sock:/var/run/docker.sock:ro
       # docker-composeファイル（health-check.shで使用）
       - ./docker-compose.yml:/app/docker/docker-compose.yml:ro
@@ -286,6 +289,7 @@ services:
       - HEALTH_CHECK_TIMEOUT=10  # ヘルスチェックタイムアウト（秒、デフォルト10秒）
       - HEALTH_CHECK_CWD=/app/docker  # health-check.sh実行時の作業ディレクトリ
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}  # Redis認証パスワード（health-check.shで使用）
+      - HEALTH_API_TOKEN=${HEALTH_API_TOKEN:-}  # API認証トークン（本番環境では必須）
     ports:
       - "8888:8888"
     networks:

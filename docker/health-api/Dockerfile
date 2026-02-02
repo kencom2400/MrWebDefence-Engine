@@ -10,12 +10,18 @@ RUN apk add --no-cache \
     curl \
     jq
 
+# セキュリティ向上のため、非rootユーザーを作成
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
 # ヘルスチェックAPIサーバーをコピー
-COPY health-api-server.py /app/health-api-server.py
+COPY --chown=appuser:appgroup health-api-server.py /app/health-api-server.py
 RUN chmod +x /app/health-api-server.py
 
 # ヘルスチェックスクリプトは実行時にマウント
 # /app/scriptsにマウントされることを想定
+
+# 非rootユーザーとして実行
+USER appuser
 
 EXPOSE 8888
 

@@ -146,9 +146,12 @@ if [ "$output_json" = true ]; then
     system_info=$(get_system_info)
     
     # 全体ステータスの判定
+    # 必須コンポーネント: nginx, openappsec-agent, redis
     overall_status="healthy"
     if [ "${health_status[nginx]}" != "healthy" ] || \
-       [ "${health_status[openappsec-agent]}" != "healthy" ]; then
+       [ "${health_status[openappsec-agent]}" != "healthy" ] || \
+       [ "${health_status[redis]}" != "healthy" ] || \
+       [ "${health_status[redis_connection]}" = "failed" ]; then
         overall_status="unhealthy"
     fi
     
