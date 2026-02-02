@@ -145,7 +145,13 @@ check_redis() {
         health_status["redis"]="healthy"
         
         # Redis接続確認（PING）
-        if docker-compose exec -T redis redis-cli ping >/dev/null 2>&1; then
+        # パスワード認証に対応
+        local redis_auth_arg=""
+        if [ -n "$REDIS_PASSWORD" ]; then
+            redis_auth_arg="-a $REDIS_PASSWORD"
+        fi
+
+        if docker-compose exec -T redis redis-cli ${redis_auth_arg} ping >/dev/null 2>&1; then
             health_status["redis_connection"]="ok"
         else
             health_status["redis_connection"]="failed"
@@ -180,7 +186,6 @@ check_fluentd() {
 # システム情報の取得
 get_system_info() {
     local nginx_version
-    local openappsec_version
     
     nginx_version=$(docker-compose exec -T nginx nginx -v 2>&1 | grep -oP 'nginx/\K[0-9.]+' || echo "unknown")
     
@@ -210,6 +215,14 @@ import subprocess
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 import os
+import logging
+
+# ロギング設定
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('health-api')
 
 PORT = int(os.environ.get('HEALTH_API_PORT', '8888'))
 HEALTH_CHECK_SCRIPT = '/app/scripts/health-check.sh'
@@ -276,6 +289,7 @@ class HealthAPIHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(health_data, indent=2).encode('utf-8'))
         
         except subprocess.TimeoutExpired:
+            logger.error("Health check timeout")
             self.send_response(503)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
@@ -285,6 +299,7 @@ class HealthAPIHandler(BaseHTTPRequestHandler):
             }).encode('utf-8'))
         
         except Exception as e:
+            logger.exception("Unexpected error during health check")
             self.send_response(500)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
@@ -294,19 +309,19 @@ class HealthAPIHandler(BaseHTTPRequestHandler):
             }).encode('utf-8'))
     
     def log_message(self, format, *args):
-        # アクセスログを標準出力に出力
-        print(f"{self.address_string()} - [{self.log_date_time_string()}] {format % args}")
+        # アクセスログをloggingモジュールで出力
+        logger.info(f"{self.address_string()} - {format % args}")
 
 def run_server():
     server = HTTPServer(('0.0.0.0', PORT), HealthAPIHandler)
-    print(f"✅ ヘルスチェックAPIサーバーを起動しました: http://0.0.0.0:{PORT}")
-    print(f"  GET /engine/v1/health - 詳細なヘルスチェック")
-    print(f"  GET /health - 簡易ヘルスチェック")
+    logger.info(f"✅ ヘルスチェックAPIサーバーを起動しました: http://0.0.0.0:{PORT}")
+    logger.info(f"  GET /engine/v1/health - 詳細なヘルスチェック")
+    logger.info(f"  GET /health - 簡易ヘルスチェック")
     
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\n🛑 サーバーを停止しています...")
+        logger.info("\n🛑 サーバーを停止しています...")
         server.shutdown()
 
 if __name__ == '__main__':
@@ -362,6 +377,7 @@ CMD ["python3", "/app/health-api-server.py"]
       - HEALTH_API_PORT=8888
       - HEALTH_CHECK_TIMEOUT=10  # ヘルスチェックタイムアウト（秒、デフォルト10秒）
       - HEALTH_CHECK_CWD=/app/docker  # health-check.sh実行時の作業ディレクトリ
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}  # Redis認証パスワード（health-check.shで使用）
     ports:
       - "8888:8888"
     networks:

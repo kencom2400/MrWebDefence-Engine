@@ -12779,3 +12779,221 @@ echo "テスト対象FQDN: ${TEST_FQDN}"
 
 ---
 
+
+## 27. ヘルスチェック機能実装設計の最終改善（PR #47 - 3回目のレビュー）
+
+### 27-1. Redis認証パスワードへの対応 🔴 High
+
+**問題**: `check_redis`関数でRedisのパスワード認証が考慮されていないため、パスワードが設定されたRedis環境でヘルスチェックが失敗する
+
+**解決策**: `REDIS_PASSWORD`環境変数を使用してRedis認証に対応する
+
+```bash
+# ❌ 悪い例: パスワード認証なし
+check_redis() {
+    if docker-compose ps redis 2>/dev/null | grep -q "Up"; then
+        health_status["redis"]="healthy"
+        
+        # Redis接続確認（PING） - パスワード認証が考慮されていない
+        if docker-compose exec -T redis redis-cli ping >/dev/null 2>&1; then
+            health_status["redis_connection"]="ok"
+        ...
+    fi
+}
+
+# ✅ 良い例: パスワード認証に対応
+check_redis() {
+    if docker-compose ps redis 2>/dev/null | grep -q "Up"; then
+        health_status["redis"]="healthy"
+        
+        # Redis接続確認（PING）
+        # パスワード認証に対応
+        local redis_auth_arg=""
+        if [ -n "$REDIS_PASSWORD" ]; then
+            redis_auth_arg="-a $REDIS_PASSWORD"
+        fi
+
+        if docker-compose exec -T redis redis-cli ${redis_auth_arg} ping >/dev/null 2>&1; then
+            health_status["redis_connection"]="ok"
+        else
+            health_status["redis_connection"]="failed"
+            error_messages["redis_connection"]="Redisへの接続に失敗しました"
+        fi
+    else
+        health_status["redis"]="unhealthy"
+        error_messages["redis"]="Redisコンテナが起動していません"
+    fi
+}
+```
+
+**docker-compose.ymlへの環境変数追加**:
+```yaml
+  health-api:
+    environment:
+      - HEALTH_API_PORT=8888
+      - HEALTH_CHECK_TIMEOUT=10
+      - HEALTH_CHECK_CWD=/app/docker
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}  # Redis認証パスワード
+```
+
+**理由**:
+- 本番環境ではRedisにパスワード認証が必須（セキュリティベストプラクティス）
+- パスワードが設定されていない場合も動作する（空文字列チェック）
+- 環境変数で柔軟に設定可能
+- docker-compose.ymlのRedis設定と整合性がとれる
+
+**参照**: PR #47 - Task 5.6: ヘルスチェック機能実装（Gemini Code Assistレビュー指摘 - 3回目）
+
+---
+
+### 27-2. 未使用変数の削除 🟡 Medium
+
+**問題**: `get_system_info`関数で宣言されているが使用されていない変数があり、混乱を招く
+
+**解決策**: 使用されていない変数を削除する
+
+```bash
+# ❌ 悪い例: 未使用変数が存在
+get_system_info() {
+    local nginx_version
+    local openappsec_version  # 宣言されているが使用されていない
+    
+    nginx_version=$(docker-compose exec -T nginx nginx -v 2>&1 | grep -oP 'nginx/\K[0-9.]+' || echo "unknown")
+    
+    jq -n \
+      --arg nginx_version "$nginx_version" \
+      ...
+}
+
+# ✅ 良い例: 未使用変数を削除
+get_system_info() {
+    local nginx_version
+    
+    nginx_version=$(docker-compose exec -T nginx nginx -v 2>&1 | grep -oP 'nginx/\K[0-9.]+' || echo "unknown")
+    
+    jq -n \
+      --arg nginx_version "$nginx_version" \
+      ...
+}
+```
+
+**理由**:
+- コードの可読性向上
+- 混乱の防止（「この変数は何に使われるのか？」という疑問を排除）
+- 将来的に使用する予定がない場合は削除すべき
+- 必要になったら再度追加すればよい
+
+**参照**: PR #47 - Task 5.6: ヘルスチェック機能実装（Gemini Code Assistレビュー指摘 - 3回目）
+
+---
+
+### 27-3. Pythonロギングの改善（loggingモジュール活用） 🟡 Medium
+
+**問題**: `print()`を使用したロギングは柔軟性に欠け、管理しにくい
+
+**解決策**: Python標準の`logging`モジュールを使用する
+
+```python
+# ❌ 悪い例: print()でロギング
+def log_message(self, format, *args):
+    # アクセスログを標準出力に出力
+    print(f"{self.address_string()} - [{self.log_date_time_string()}] {format % args}")
+
+def run_server():
+    server = HTTPServer(('0.0.0.0', PORT), HealthAPIHandler)
+    print(f"✅ ヘルスチェックAPIサーバーを起動しました: http://0.0.0.0:{PORT}")
+    ...
+
+# ✅ 良い例: loggingモジュールを使用
+import logging
+
+# ロギング設定
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('health-api')
+
+class HealthAPIHandler(BaseHTTPRequestHandler):
+    def handle_health_check(self):
+        try:
+            ...
+        except subprocess.TimeoutExpired:
+            logger.error("Health check timeout")
+            ...
+        except Exception as e:
+            logger.exception("Unexpected error during health check")
+            ...
+    
+    def log_message(self, format, *args):
+        # アクセスログをloggingモジュールで出力
+        logger.info(f"{self.address_string()} - {format % args}")
+
+def run_server():
+    server = HTTPServer(('0.0.0.0', PORT), HealthAPIHandler)
+    logger.info(f"✅ ヘルスチェックAPIサーバーを起動しました: http://0.0.0.0:{PORT}")
+    ...
+```
+
+**メリット**:
+- **ログレベルの制御**: DEBUG, INFO, WARNING, ERROR, CRITICALで重要度を分類
+- **ログフォーマットの統一**: タイムスタンプ、ロガー名、レベル、メッセージを自動付与
+- **出力先の柔軟性**: 標準エラー出力、ファイル、syslogなどに簡単に切り替え可能
+- **スタックトレース**: `logger.exception()`で自動的にスタックトレースを出力
+- **環境変数での制御**: `LOG_LEVEL`環境変数でログレベルを動的に変更可能
+
+**実装の追加改善**:
+```python
+# 環境変数でログレベルを制御
+log_level = os.environ.get('LOG_LEVEL', 'INFO').upper()
+logging.basicConfig(
+    level=getattr(logging, log_level, logging.INFO),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+```
+
+**理由**:
+- プロダクション環境でのログ管理が容易
+- デバッグ時にログレベルを変更して詳細情報を取得可能
+- ログの集約・分析が容易（構造化されたフォーマット）
+- Pythonの標準的なロギングプラクティスに準拠
+
+**参照**: PR #47 - Task 5.6: ヘルスチェック機能実装（Gemini Code Assistレビュー指摘 - 3回目）
+
+---
+
+## Gemini Code Assistレビューの継続的改善（3サイクル目）
+
+### レビューサイクルのまとめ
+
+#### 1回目のレビュー（基本的な問題）:
+- 🔴 Critical: docker-compose依存パッケージ不足
+- 🟡 Medium: 手動JSON生成の脆弱性
+- 🟡 Medium: ヘルスチェックタイムアウト最適化
+- 💡 提案: 長期的なアーキテクチャ改善
+
+#### 2回目のレビュー（詳細な改善提案）:
+- 🟡 Medium: ルートパスをヘルスチェックエンドポイントから除外
+- 🟡 Medium: 作業ディレクトリのハードコード回避
+- 🟡 Medium: タイムアウト値の不整合を統一
+- 🟡 Medium: テスト対象FQDNの動的取得
+
+#### 3回目のレビュー（最終的な堅牢性向上）:
+- 🔴 High: Redis認証パスワードへの対応
+- 🟡 Medium: 未使用変数の削除
+- 🟡 Medium: Pythonロギングの改善
+
+### 学んだこと
+
+**継続的レビューの価値**:
+1. 初回レビューでは基本的な問題を検出
+2. 2回目で設計の詳細を改善
+3. 3回目で本番運用を見据えた堅牢性を向上
+
+**設計の進化**:
+- 基本的な動作確認 → 詳細な設計改善 → 本番運用対応
+- レビュー→修正→レビューのサイクルで段階的に品質向上
+- 各レビューで新しい観点が追加され、より完成度の高い設計に
+
+---
+
