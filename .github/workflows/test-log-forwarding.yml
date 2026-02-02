@@ -131,6 +131,9 @@ jobs:
 
       - name: Run log forwarding test
         working-directory: docker
+        env:
+          CI: "true"
+          GITHUB_ACTIONS: "true"
         run: |
           chmod +x ../scripts/openappsec/test-log-forwarding.sh
           ../scripts/openappsec/test-log-forwarding.sh
