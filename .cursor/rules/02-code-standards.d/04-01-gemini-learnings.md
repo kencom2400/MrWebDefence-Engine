@@ -12346,3 +12346,227 @@ fi
 **参照**: PR #42 - Task 5.3: ログ転送機能の実装（Gemini Code Assistレビュー指摘）
 
 ---
+
+## 25. ヘルスチェック機能実装の設計レビュー（PR #47）
+
+### 25-1. Dockerfileでのdocker-compose依存パッケージ不足 🔴 Critical
+
+**問題**: ヘルスチェックAPIコンテナのDockerfileで、`health-check.sh`スクリプトが`docker-compose`コマンドを使用しているが、Dockerfileには`docker-compose`のインストールが含まれていない
+
+**解決策**: `docker-compose`パッケージをインストールする
+
+```dockerfile
+# ❌ 悪い例: docker-composeがインストールされていない
+RUN apk add --no-cache \
+    bash \
+    docker-cli \
+    curl \
+    jq
+
+# ✅ 良い例: docker-composeを追加
+RUN apk add --no-cache \
+    bash \
+    docker-cli \
+    docker-compose \
+    curl \
+    jq
+```
+
+**理由**:
+- `docker-cli`だけでは`docker-compose`コマンドは使えない
+- `health-check.sh`が`docker-compose ps`や`docker-compose exec`を使用している
+- このままでは実行時にエラーが発生する
+
+**参照**: PR #47 - Task 5.6: ヘルスチェック機能実装（Gemini Code Assistレビュー指摘）
+
+---
+
+### 25-2. 手動JSON生成の脆弱性 🟡 Medium
+
+**問題**: `echo`で手動JSONを生成すると、変数に特殊文字が含まれている場合にJSON構文が壊れる
+
+**解決策**: `jq`を使って安全にJSONを生成する
+
+```bash
+# ❌ 悪い例: echoで手動JSON生成（特殊文字に脆弱）
+get_system_info() {
+    local nginx_version
+    nginx_version=$(docker-compose exec -T nginx nginx -v 2>&1 | grep -oP 'nginx/\K[0-9.]+' || echo "unknown")
+    
+    echo "{
+        \"nginx_version\": \"$nginx_version\",
+        \"timestamp\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\",
+        \"hostname\": \"$(hostname)\"
+    }"
+}
+
+# ✅ 良い例: jqを使って安全に生成
+get_system_info() {
+    local nginx_version
+    nginx_version=$(docker-compose exec -T nginx nginx -v 2>&1 | grep -oP 'nginx/\K[0-9.]+' || echo "unknown")
+    
+    # jqを使って安全にJSONを生成（特殊文字のエスケープに対応）
+    jq -n \
+      --arg nginx_version "$nginx_version" \
+      --arg timestamp "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+      --arg hostname "$(hostname)" \
+      '{nginx_version: $nginx_version, timestamp: $timestamp, hostname: $hostname}'
+}
+```
+
+**理由**:
+- 変数に`"`や改行、特殊文字が含まれていると、手動JSON生成では構文エラーになる
+- `jq -n --arg`を使うと、変数が自動的にエスケープされる
+- より堅牢で安全なJSON生成が可能
+
+**参照**: PR #47 - Task 5.6: ヘルスチェック機能実装（Gemini Code Assistレビュー指摘）
+
+---
+
+### 25-3. ヘルスチェックタイムアウト設定の最適化 🟡 Medium
+
+**問題**: ヘルスチェックのタイムアウトが30秒に設定されているが、ロードバランサーの一般的なタイムアウト（2〜5秒）より長すぎる
+
+**解決策**: タイムアウトを短く設定し、環境変数で設定可能にする
+
+```python
+# ❌ 悪い例: 固定で30秒タイムアウト
+result = subprocess.run(
+    [HEALTH_CHECK_SCRIPT, '--json'],
+    capture_output=True,
+    text=True,
+    timeout=30,  # 30秒は長すぎる
+    cwd='/app/docker'
+)
+
+# ✅ 良い例: デフォルト10秒、環境変数で設定可能
+timeout = int(os.environ.get('HEALTH_CHECK_TIMEOUT', '10'))
+result = subprocess.run(
+    [HEALTH_CHECK_SCRIPT, '--json'],
+    capture_output=True,
+    text=True,
+    timeout=timeout,
+    cwd='/app/docker'
+)
+```
+
+```yaml
+# docker-compose.ymlで環境変数を設定
+environment:
+  - HEALTH_API_PORT=8888
+  - HEALTH_CHECK_TIMEOUT=10  # デフォルト10秒
+```
+
+**理由**:
+- 多くのロードバランサーは2〜5秒のタイムアウトを設定している
+- 30秒では、ロードバランサーがタイムアウトと判断する前にヘルスチェックが完了しない
+- 環境変数で設定可能にすることで、柔軟な運用が可能
+
+**推奨設定**:
+- デフォルト: 10秒（一般的な用途）
+- ロードバランサーのタイムアウトが5秒の場合: `HEALTH_CHECK_TIMEOUT=3`に設定
+
+**参照**: PR #47 - Task 5.6: ヘルスチェック機能実装（Gemini Code Assistレビュー指摘）
+
+---
+
+### 25-4. 長期的なアーキテクチャ改善の検討 💡 提案
+
+**問題**: PythonのAPIサーバーからシェルスクリプトを呼び出すアーキテクチャは、パフォーマンスとメンテナンス性の観点で改善の余地がある
+
+**提案**: 将来的にPythonで完結する実装へ移行
+
+**現在のアーキテクチャ**:
+```
+Python API Server
+  ↓ subprocess.run()
+Shell Script (health-check.sh)
+  ↓ docker-compose
+Docker Containers
+```
+
+**課題**:
+- サブプロセス起動のオーバーヘッド
+- エラーハンドリングがシェルスクリプトとPythonに分散
+- メンテナンス性の低下（2つの言語で実装）
+
+**改善案: Pythonで完結する実装**:
+```python
+import docker
+import redis
+
+def check_container_health(container_name):
+    """Dockerコンテナの状態を直接確認"""
+    client = docker.from_env()
+    try:
+        container = client.containers.get(container_name)
+        return container.status == 'running'
+    except docker.errors.NotFound:
+        return False
+
+def check_redis_connection(host='redis', port=6379):
+    """Redis接続を直接確認"""
+    try:
+        r = redis.Redis(host=host, port=port, socket_timeout=2)
+        return r.ping()
+    except (redis.ConnectionError, redis.TimeoutError):
+        return False
+```
+
+**メリット**:
+- パフォーマンス向上（サブプロセス起動不要）
+- エラーハンドリングが一貫（すべてPython内で完結）
+- メンテナンス性向上（単一言語で実装）
+- より詳細な情報取得が可能
+
+**実装タイミング**:
+- 現在の実装完了後（既存実装を活用する方針を優先）
+- パフォーマンスやメンテナンス性の問題が顕在化した場合
+- 段階的に移行（Phase 1: 新規機能はPythonで実装）
+
+**依存ライブラリ**:
+- `docker-py`: Dockerコンテナの状態確認
+- `redis-py`: Redis接続確認
+
+**参照**: PR #47 - Task 5.6: ヘルスチェック機能実装（Gemini Code Assistレビュー指摘）
+
+---
+
+## Gemini Code Assistレビューの活用ガイドライン
+
+### レビュー結果の取り込み手順
+
+1. **指摘の重要度を確認**
+   - 🔴 Critical: 実装前に必ず修正
+   - 🟡 Medium: 実装時に修正を検討
+   - 💡 提案: 将来の改善として記録
+
+2. **設計書への反映**
+   - Criticalな指摘は即座に設計書を修正
+   - Mediumな指摘は設計書に改善案として追記
+   - 提案は「将来の改善計画」セクションに追記
+
+3. **ルールファイルへの追加**
+   - このファイル（`04-01-gemini-learnings.md`）に指摘内容を記録
+   - 類似の問題を防ぐためのガイドラインとして活用
+
+4. **PRへの対応**
+   - 修正内容をコミット
+   - Geminiのコメントに返信（修正内容を説明）
+   - 必要に応じて再レビューを依頼
+
+### Geminiコマンドの活用
+
+```bash
+# PRの再レビューを依頼
+/gemini review
+
+# 特定の質問をする
+@gemini-code-assist この設計の代替案はありますか？
+
+# ヘルプを表示
+/gemini help
+```
+
+---
+

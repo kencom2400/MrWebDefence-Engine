@@ -184,11 +184,12 @@ get_system_info() {
     
     nginx_version=$(docker-compose exec -T nginx nginx -v 2>&1 | grep -oP 'nginx/\K[0-9.]+' || echo "unknown")
     
-    echo "{
-        \"nginx_version\": \"$nginx_version\",
-        \"timestamp\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\",
-        \"hostname\": \"$(hostname)\"
-    }"
+    # jqを使って安全にJSONを生成（特殊文字のエスケープに対応）
+    jq -n \
+      --arg nginx_version "$nginx_version" \
+      --arg timestamp "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+      --arg hostname "$(hostname)" \
+      '{nginx_version: $nginx_version, timestamp: $timestamp, hostname: $hostname}'
 }
 ```
 
@@ -238,11 +239,13 @@ class HealthAPIHandler(BaseHTTPRequestHandler):
     def handle_health_check(self):
         try:
             # health-check.shスクリプトを実行
+            # タイムアウトは環境変数で設定可能（デフォルト10秒）
+            timeout = int(os.environ.get('HEALTH_CHECK_TIMEOUT', '10'))
             result = subprocess.run(
                 [HEALTH_CHECK_SCRIPT, '--json'],
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=timeout,
                 cwd='/app/docker'
             )
             
@@ -319,6 +322,7 @@ WORKDIR /app
 RUN apk add --no-cache \
     bash \
     docker-cli \
+    docker-compose \
     curl \
     jq
 
@@ -353,6 +357,7 @@ CMD ["python3", "/app/health-api-server.py"]
       - ./docker-compose.yml:/app/docker/docker-compose.yml:ro
     environment:
       - HEALTH_API_PORT=8888
+      - HEALTH_CHECK_TIMEOUT=10  # ヘルスチェックタイムアウト（秒、デフォルト10秒）
     ports:
       - "8888:8888"
     networks:
@@ -689,9 +694,15 @@ curl -s http://localhost:8888/engine/v1/health | jq '.components.redis'
 ### 2. health-api-server.pyのエラーハンドリング
 
 - **health-check.shの実行失敗**: HTTP 503を返す
-- **タイムアウト（30秒）**: HTTP 503を返す
+- **タイムアウト**: HTTP 503を返す（デフォルト10秒、環境変数`HEALTH_CHECK_TIMEOUT`で変更可能）
 - **JSONパースエラー**: HTTP 500を返す
 - **予期しないエラー**: HTTP 500を返す
+
+**タイムアウト設定について**:
+- デフォルト値: 10秒（ロードバランサーの一般的なタイムアウトに適合）
+- 環境変数`HEALTH_CHECK_TIMEOUT`で秒単位で設定可能
+- ロードバランサーのタイムアウト設定より短く設定することを推奨
+- 例: ロードバランサーが5秒タイムアウトの場合、`HEALTH_CHECK_TIMEOUT=3`に設定
 
 ## セキュリティ考慮事項
 
@@ -758,6 +769,63 @@ health-apiコンテナはDockerソケットをマウントします。これに�
 3. **Phase 3の実装**: テストと動作確認
 4. **Phase 4の実装**: ドキュメント更新と最終確認
 5. **受け入れテスト**: すべての受け入れ条件を満たしていることを確認
+
+## 将来の改善計画
+
+### 1. Pythonで完結する実装への移行
+
+現在の設計では、既存の`health-check.sh`スクリプトを拡張し、PythonのヘルスチェックAPIサーバーから呼び出す方式を採用しています。これは既存実装を活用する上で合理的なアプローチですが、長期的には以下の改善を検討します：
+
+**現在のアーキテクチャの課題**:
+- シェルスクリプト実行のオーバーヘッド（サブプロセス起動）
+- エラーハンドリングがシェルスクリプトとPythonに分散
+- メンテナンス性の低下（2つの言語で実装）
+
+**改善案: Pythonで完結する実装**:
+
+```python
+import docker
+import redis
+
+def check_container_health(container_name):
+    """Dockerコンテナの状態を直接確認"""
+    client = docker.from_env()
+    try:
+        container = client.containers.get(container_name)
+        return container.status == 'running'
+    except docker.errors.NotFound:
+        return False
+
+def check_redis_connection(host='redis', port=6379):
+    """Redis接続を直接確認"""
+    try:
+        r = redis.Redis(host=host, port=port, socket_timeout=2)
+        return r.ping()
+    except (redis.ConnectionError, redis.TimeoutError):
+        return False
+```
+
+**メリット**:
+- パフォーマンス向上（サブプロセス起動のオーバーヘッドがない）
+- エラーハンドリングが一貫（すべてPython内で完結）
+- メンテナンス性向上（単一言語で実装）
+- より詳細な情報取得が可能（docker-pyやredis-pyの機能を活用）
+
+**実装タイミング**:
+- 現在のPhase 1〜4の実装完了後
+- パフォーマンスやメンテナンス性の問題が顕在化した場合
+- または、余裕があれば段階的に移行
+
+**依存ライブラリ**:
+- `docker-py`: Dockerコンテナの状態確認
+- `redis-py`: Redis接続確認
+
+### 2. その他の改善項目
+
+- **キャッシュ機能**: 頻繁なヘルスチェックリクエストに対して結果をキャッシュ（例: 5秒間）
+- **メトリクス収集**: Prometheus形式のメトリクスエンドポイント追加
+- **アラート機能**: 異常検知時に外部システムへ通知
+- **並列チェック**: 各コンポーネントのチェックを並列実行してパフォーマンス向上
 
 ## 参考資料
 
