@@ -71,10 +71,11 @@ class HealthAPIHandler(BaseHTTPRequestHandler):
                 try:
                     health_data = json.loads(result.stdout)
                 except json.JSONDecodeError:
+                    # セキュリティ: 内部エラー詳細を漏洩させない
+                    logger.error(f"Health check script failed: {result.stderr}")
                     health_data = {
                         "status": "unhealthy",
-                        "message": "Health check script failed",
-                        "stderr": result.stderr
+                        "message": "Health check script failed"
                     }
                 
                 self.send_response(503)
@@ -93,13 +94,14 @@ class HealthAPIHandler(BaseHTTPRequestHandler):
             }).encode('utf-8'))
         
         except Exception as e:
+            # セキュリティ: 内部例外詳細を漏洩させない
             logger.exception("Unexpected error during health check")
             self.send_response(500)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps({
                 "status": "error",
-                "message": str(e)
+                "message": "Internal server error"
             }).encode('utf-8'))
     
     def log_message(self, format, *args):

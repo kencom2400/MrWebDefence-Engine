@@ -90,12 +90,13 @@ check_redis() {
         
         # Redis接続確認（PING）
         # パスワード認証に対応
-        local redis_auth_arg=""
+        # セキュリティ: 配列を使用してコマンドインジェクションを防止
+        local redis_auth_args=()
         if [ -n "$REDIS_PASSWORD" ]; then
-            redis_auth_arg="-a $REDIS_PASSWORD"
+            redis_auth_args=("-a" "$REDIS_PASSWORD")
         fi
 
-        if docker-compose exec -T redis redis-cli ${redis_auth_arg} ping >/dev/null 2>&1; then
+        if docker-compose exec -T redis redis-cli "${redis_auth_args[@]}" ping >/dev/null 2>&1; then
             health_status["redis_connection"]="ok"
         else
             health_status["redis_connection"]="failed"
