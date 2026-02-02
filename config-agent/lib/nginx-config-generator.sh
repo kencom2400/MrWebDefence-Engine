@@ -21,8 +21,8 @@ validate_backend_host() {
         echo "httpbin.org"
         return
     fi
-    # 許可パターン: 英数字、ハイフン、ドット、localhost
-    if echo "$host" | grep -qE '^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$|^localhost$|^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'; then
+    # 許可パターン: 各ラベルが英数字で始まり英数字またはハイフンのみ、英数字で終わる（a..b, a-.com 等を拒否）、localhost、IPv4
+    if echo "$host" | grep -qE '^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$|^localhost$|^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'; then
         # IPv4の各オクテットが0-255であることを確認
         if echo "$host" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'; then
             local o1 o2 o3 o4
