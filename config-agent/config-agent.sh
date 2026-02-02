@@ -22,7 +22,7 @@ CACHE_TTL="${CACHE_TTL:-300}"  # デフォルト5分
 # 出力ディレクトリ
 OUTPUT_DIR="${OUTPUT_DIR:-/app/output}"
 OPENAPPSEC_CONFIG="${OUTPUT_DIR}/openappsec/local_policy.yaml"
-NGINX_CONF_DIR="${OUTPUT_DIR}/nginx/conf.d"
+NGINX_OUTPUT_DIR="${OUTPUT_DIR}/nginx"
 
 # ログレベル設定
 LOG_LEVEL="${LOG_LEVEL:-INFO}"
@@ -134,7 +134,7 @@ reload_nginx_config() {
         log_info "シグナルファイル方式を使用します（Nginxコンテナ内のwatch-config.shが監視します）"
         
         # シグナルファイルを作成（共有ボリューム上）
-        local signal_file="${NGINX_CONF_DIR}/.reload_signal"
+        local signal_file="${NGINX_OUTPUT_DIR}/conf.d/.reload_signal"
         touch "$signal_file"
         
         # シグナルファイルの存在を確認
@@ -164,7 +164,7 @@ main_loop() {
     log_info "ログレベル: ${LOG_LEVEL}"
     log_debug "出力ディレクトリ: ${OUTPUT_DIR}"
     log_debug "OpenAppSec設定ファイル: ${OPENAPPSEC_CONFIG}"
-    log_debug "Nginx設定ディレクトリ: ${NGINX_CONF_DIR}"
+    log_debug "Nginx設定ディレクトリ: ${NGINX_OUTPUT_DIR}"
     
     # 環境変数の確認
     if [ -z "$CONFIG_API_TOKEN" ]; then
@@ -264,7 +264,7 @@ main_loop() {
         
         # 設定ファイル生成
         local generate_error_file="$tmp_dir/generate_error"
-        if generate_configs "$config_data" "$OPENAPPSEC_CONFIG" "$NGINX_CONF_DIR" 2>"$generate_error_file"; then
+        if generate_configs "$config_data" "$OPENAPPSEC_CONFIG" "$NGINX_OUTPUT_DIR" 2>"$generate_error_file"; then
             local generate_error_msg
             generate_error_msg=$(cat "$generate_error_file" 2>/dev/null || echo "")
             

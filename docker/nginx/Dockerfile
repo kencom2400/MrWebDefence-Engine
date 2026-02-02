@@ -1,6 +1,6 @@
 # OpenAppSec Nginx Attachment with GeoIP2 Module
 # Base: OpenAppSec公式のNginxイメージ（Attachment Moduleが組み込まれている）
-FROM ghcr.io/openappsec/nginx-attachment:latest
+FROM ghcr.io/openappsec/nginx-attachment:latest AS builder
 
 # メンテナンス情報
 LABEL maintainer="MrWebDefence Team"
@@ -8,7 +8,6 @@ LABEL description="OpenAppSec Nginx with GeoIP2 Module"
 LABEL version="1.0.0"
 
 # 環境変数
-ENV NGINX_VERSION=1.25.4
 ENV GEOIP2_MODULE_VERSION=3.4
 ENV MAXMINDDB_VERSION=1.7.1
 
@@ -42,58 +41,26 @@ RUN cd /tmp && \
     tar -xzf ${GEOIP2_MODULE_VERSION}.tar.gz && \
     mv ngx_http_geoip2_module-${GEOIP2_MODULE_VERSION} /tmp/ngx_http_geoip2_module && \
     \
-    # Nginxソースコードのダウンロード
+    # 実行中のNginxのバージョンとconfigureオプションを取得
+    NGINX_VERSION=$(nginx -v 2>&1 | sed -n 's/.*nginx\/\([0-9.]*\).*/\1/p') && \
+    echo "Detected Nginx version: ${NGINX_VERSION}" && \
+    NGINX_CONFIGURE_ARGS=$(nginx -V 2>&1 | sed -n 's/configure arguments: \(.*\)/\1/p') && \
+    echo "Detected Nginx configure args: ${NGINX_CONFIGURE_ARGS}" && \
+    \
+    # Nginxソースコードのダウンロード（検出されたバージョン）
     wget http://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz && \
     tar -xzf nginx-${NGINX_VERSION}.tar.gz && \
     \
     # 動的モジュールとしてngx_http_geoip2_moduleをビルド
+    # 注意: 既存のNginxと同じconfigureオプションを使用
     cd /tmp/nginx-${NGINX_VERSION} && \
-    ./configure \
-    --prefix=/etc/nginx \
-    --sbin-path=/usr/sbin/nginx \
-    --modules-path=/usr/lib/nginx/modules \
-    --conf-path=/etc/nginx/nginx.conf \
-    --error-log-path=/var/log/nginx/error.log \
-    --http-log-path=/var/log/nginx/access.log \
-    --pid-path=/var/run/nginx.pid \
-    --lock-path=/var/run/nginx.lock \
-    --http-client-body-temp-path=/var/cache/nginx/client_temp \
-    --http-proxy-temp-path=/var/cache/nginx/proxy_temp \
-    --http-fastcgi-temp-path=/var/cache/nginx/fastcgi_temp \
-    --http-uwsgi-temp-path=/var/cache/nginx/uwsgi_temp \
-    --http-scgi-temp-path=/var/cache/nginx/scgi_temp \
-    --user=nginx \
-    --group=nginx \
-    --with-compat \
-    --with-threads \
-    --with-http_addition_module \
-    --with-http_auth_request_module \
-    --with-http_dav_module \
-    --with-http_flv_module \
-    --with-http_gunzip_module \
-    --with-http_gzip_static_module \
-    --with-http_mp4_module \
-    --with-http_random_index_module \
-    --with-http_realip_module \
-    --with-http_secure_link_module \
-    --with-http_slice_module \
-    --with-http_ssl_module \
-    --with-http_stub_status_module \
-    --with-http_sub_module \
-    --with-http_v2_module \
-    --with-mail \
-    --with-mail_ssl_module \
-    --with-stream \
-    --with-stream_realip_module \
-    --with-stream_ssl_module \
-    --with-stream_ssl_preread_module \
-    --add-dynamic-module=/tmp/ngx_http_geoip2_module && \
+    ./configure ${NGINX_CONFIGURE_ARGS} --add-dynamic-module=/tmp/ngx_http_geoip2_module && \
     make modules && \
     cp objs/ngx_http_geoip2_module.so /usr/lib/nginx/modules/ && \
     \
     # クリーンアップ
     cd /tmp && \
-    rm -rf nginx-${NGINX_VERSION}* ${GEOIP2_MODULE_VERSION}.tar.gz && \
+    rm -rf nginx-* ${GEOIP2_MODULE_VERSION}.tar.gz && \
     apk del \
     build-base \
     wget \

@@ -15,6 +15,7 @@ CONFIG_FILE = os.environ.get('MOCK_API_CONFIG_FILE', '/tmp/mock-api-config.json'
 # デフォルト設定データ
 DEFAULT_CONFIG = {
     "version": "1.0.0",
+    "customer_name": "test-customer",
     "default_mode": "detect-learn",
     "default_custom_response": 403,
     "fqdns": [
@@ -26,7 +27,10 @@ DEFAULT_CONFIG = {
             "access_control_practice": "rate-limit-default",
             "backend_host": "httpbin.org",
             "backend_port": 80,
-            "backend_path": "/get"
+            "backend_path": "/get",
+            "geoip": {
+                "enabled": False
+            }
         },
         {
             "fqdn": "example1.com",
@@ -36,7 +40,10 @@ DEFAULT_CONFIG = {
             "access_control_practice": "rate-limit-default",
             "backend_host": "httpbin.org",
             "backend_port": 80,
-            "backend_path": "/json"
+            "backend_path": "/json",
+            "geoip": {
+                "enabled": False
+            }
         },
         {
             "fqdn": "example2.com",
@@ -46,7 +53,10 @@ DEFAULT_CONFIG = {
             "access_control_practice": "rate-limit-default",
             "backend_host": "httpbin.org",
             "backend_port": 80,
-            "backend_path": "/xml"
+            "backend_path": "/xml",
+            "geoip": {
+                "enabled": False
+            }
         },
         {
             "fqdn": "example3.com",
@@ -56,7 +66,10 @@ DEFAULT_CONFIG = {
             "access_control_practice": "rate-limit-default",
             "backend_host": "httpbin.org",
             "backend_port": 80,
-            "backend_path": "/get"
+            "backend_path": "/get",
+            "geoip": {
+                "enabled": False
+            }
         }
     ]
 }

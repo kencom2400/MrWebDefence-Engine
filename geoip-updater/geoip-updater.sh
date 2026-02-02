@@ -11,7 +11,38 @@
 #   NGINX_CONTAINER_NAME: Nginxコンテナ名（デフォルト: mwd-nginx）
 #   BACKUP_RETENTION_DAYS: バックアップ保持日数（デフォルト: 7）
 
-set -e
+set -euo pipefail  # エラー時即座に終了、未定義変数使用禁止
+
+# ========================================
+# セキュリティ: 環境変数の厳密な検証
+# ========================================
+
+# MaxMindライセンスキーの形式検証
+validate_license_key() {
+    local key="$1"
+    # MaxMindライセンスキーの形式検証（16文字の英数字）
+    if ! echo "$key" | grep -qE '^[A-Za-z0-9]{16}$'; then
+        error "無効なMAXMIND_LICENSE_KEY形式です"
+        return 1
+    fi
+    return 0
+}
+
+# Dockerコンテナ名の形式検証
+validate_container_name() {
+    local name="$1"
+    # Docker container name format validation
+    if ! echo "$name" | grep -qE '^[a-zA-Z0-9][a-zA-Z0-9_.-]+$'; then
+        error "無効なNGINX_CONTAINER_NAME形式です"
+        return 1
+    fi
+    # コマンドインジェクション防止：危険な文字の検出
+    if echo "$name" | grep -qE '[;|&$`\\]'; then
+        error "コンテナ名に危険な文字が検出されました"
+        return 1
+    fi
+    return 0
+}
 
 # ログ関数
 log() {
@@ -22,13 +53,26 @@ error() {
   echo "[$(date +'%Y-%m-%d %H:%M:%S')] ❌ エラー: $*" >&2
 }
 
-# 設定
+# 設定（環境変数の読み込み）
 MAXMIND_LICENSE_KEY="${MAXMIND_LICENSE_KEY:-}"
 MAXMIND_ACCOUNT_ID="${MAXMIND_ACCOUNT_ID:-}"
 GEOIP_DB_PATH="${GEOIP_DB_PATH:-/usr/share/GeoIP}"
 GEOIP_DB_FILE="GeoLite2-Country.mmdb"
 NGINX_CONTAINER_NAME="${NGINX_CONTAINER_NAME:-mwd-nginx}"
 BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-7}"
+
+# 環境変数の検証
+if [ -n "$MAXMIND_LICENSE_KEY" ]; then
+    if ! validate_license_key "$MAXMIND_LICENSE_KEY"; then
+        error "ライセンスキーの検証に失敗しました"
+        exit 1
+    fi
+fi
+
+if ! validate_container_name "$NGINX_CONTAINER_NAME"; then
+    error "コンテナ名の検証に失敗しました"
+    exit 1
+fi
 
 # コマンド
 COMMAND="${1:-update}"
@@ -64,8 +108,9 @@ test_mode() {
   fi
   log "✅ GeoIPデータベースパス: ${GEOIP_DB_PATH}"
   
-  # Nginxコンテナ確認
-  if docker ps --format '{{.Names}}' | grep -q "^${NGINX_CONTAINER_NAME}$"; then
+  # Nginxコンテナ確認（安全なコマンド実行）
+  declare -a docker_cmd=(docker ps --format '{{.Names}}')
+  if "${docker_cmd[@]}" | grep -q "^${NGINX_CONTAINER_NAME}$"; then
     log "✅ Nginxコンテナ: ${NGINX_CONTAINER_NAME} (起動中)"
   else
     error "Nginxコンテナが起動していません: ${NGINX_CONTAINER_NAME}"
@@ -91,11 +136,14 @@ update_mode() {
   
   log "🔄 GeoIPデータベースの更新を開始します"
   
-  # ダウンロード
+  # ダウンロード（安全なURL構築）
   log "📥 GeoLite2-Country.mmdbをダウンロード中..."
-  if ! curl -L -f \
-    "https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-Country&license_key=${MAXMIND_LICENSE_KEY}&suffix=tar.gz" \
-    -o /tmp/GeoLite2-Country.tar.gz; then
+  
+  # MaxMind Download URL（クエリパラメータは直接埋め込み、license_keyのみ安全に挿入）
+  # curlは自動的にURLエンコードしないため、license_keyは検証済みの英数字のみ
+  local download_url="https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-Country&license_key=${MAXMIND_LICENSE_KEY}&suffix=tar.gz"
+  
+  if ! curl -L -f "$download_url" -o /tmp/GeoLite2-Country.tar.gz; then
     error "ダウンロードに失敗しました"
     exit 1
   fi
@@ -122,10 +170,12 @@ update_mode() {
   log "🗑️  古いバックアップを削除中（${BACKUP_RETENTION_DAYS}日以上）..."
   find "${GEOIP_DB_PATH}" -name "${GEOIP_DB_FILE}.*.bak" -mtime +${BACKUP_RETENTION_DAYS} -delete 2>/dev/null || true
   
-  # Nginxリロード
+  # Nginxリロード（安全なコマンド実行）
   log "🔄 Nginxをリロード中..."
-  if docker exec "${NGINX_CONTAINER_NAME}" nginx -t 2>&1; then
-    docker exec "${NGINX_CONTAINER_NAME}" nginx -s reload
+  declare -a test_cmd=(docker exec "$NGINX_CONTAINER_NAME" nginx -t)
+  if "${test_cmd[@]}" 2>&1; then
+    declare -a reload_cmd=(docker exec "$NGINX_CONTAINER_NAME" nginx -s reload)
+    "${reload_cmd[@]}"
     log "✅ Nginxリロードが成功しました"
   else
     error "Nginx設定テストに失敗しました"

@@ -1,17 +1,18 @@
 services:
   nginx:
-    # OpenAppSec公式のNginxイメージ（GeoIP機能は実装PR後に有効化）
+    # OpenAppSec公式のNginxイメージ（TODO: GeoIP2モジュールは別PRで追加予定）
     # 注意: 特定バージョンを指定することを推奨（再現性のため）
     # build:
     #   context: ./nginx
     #   dockerfile: Dockerfile
-    # 既存イメージを使用する場合（GeoIP機能なし）:
+    # 既存イメージを使用:
     image: ghcr.io/openappsec/nginx-attachment:latest
     platform: linux/amd64
     container_name: mwd-nginx
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/geoip:/etc/nginx/geoip:ro
       # 設定ファイル変更監視スクリプト（Dockerソケットがマウントされていない場合の代替手段）
       - ./nginx/watch-config.sh:/usr/local/bin/watch-config.sh:ro
       # ログファイル（共有ボリューム方式の場合）
@@ -150,6 +151,7 @@ services:
       - ./openappsec:/app/output/openappsec:rw
       # 出力先: Nginx設定ファイル
       - ./nginx/conf.d:/app/output/nginx/conf.d:rw
+      - ./nginx/geoip:/app/output/nginx/geoip:rw
       # Nginxログディレクトリ（FQDN別ディレクトリ作成用）
       - ./nginx/logs:/var/log/nginx:rw
       # Dockerソケット（Nginxリロード用）

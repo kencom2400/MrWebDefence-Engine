@@ -1,13 +1,72 @@
 #!/bin/bash
 
-# Nginx設定生成スクリプト
+# Nginx設定生成スクリプト（GeoIP機能対応版）
 # JSONデータからNginx設定ファイルを生成
+# アーキテクチャ: Hybrid Approach (MWD-42-geoip-architecture.md)
 
-set -e
+set -euo pipefail
 
-# バックエンドホストのバリデーション（設定インジェクション・SSRF対策）
-# 許可: ドメイン名（英数字・ハイフン・ドット）、localhost、IPv4
-# 拒否: 空白・改行・;|$`<>() 等のシェル/設定に危険な文字
+# ========================================
+# 入力検証関数（セキュリティ対策）
+# ========================================
+
+# FQDN名の検証
+validate_fqdn() {
+    local fqdn="$1"
+    # FQDNの形式検証（RFC 1035準拠）
+    if ! echo "$fqdn" | grep -qE '^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$'; then
+        echo "⚠️  警告: 無効なFQDN形式: $fqdn" >&2
+        return 1
+    fi
+    # 変数名として安全な文字のみ許可
+    if echo "$fqdn" | grep -qE '[^a-zA-Z0-9.-]'; then
+        echo "⚠️  警告: FQDNに危険な文字が含まれています: $fqdn" >&2
+        return 1
+    fi
+    return 0
+}
+
+# IP/CIDR範囲の厳密な検証
+validate_ip_cidr() {
+    local ip_cidr="$1"
+    # IPv4 CIDR形式の検証
+    if ! echo "$ip_cidr" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?$'; then
+        echo "⚠️  警告: 無効なIP/CIDR形式: $ip_cidr" >&2
+        return 1
+    fi
+    # IPアドレスの範囲検証（0-255）
+    local IFS='.'
+    local ip_part="${ip_cidr%/*}"
+    read -ra OCTETS <<< "$ip_part"
+    for octet in "${OCTETS[@]}"; do
+        if [[ $octet -gt 255 ]]; then
+            echo "⚠️  警告: 無効なIPオクテット: $octet in $ip_cidr" >&2
+            return 1
+        fi
+    done
+    # CIDR範囲の検証（0-32）
+    if [[ "$ip_cidr" =~ / ]]; then
+        local cidr="${ip_cidr##*/}"
+        if [[ $cidr -gt 32 ]] || [[ $cidr -lt 0 ]]; then
+            echo "⚠️  警告: 無効なCIDR範囲: $cidr" >&2
+            return 1
+        fi
+    fi
+    return 0
+}
+
+# 国コードの厳密な検証（ISO 3166-1 alpha-2）
+validate_country_code() {
+    local country_code="$1"
+    # 大文字2文字の検証
+    if ! echo "$country_code" | grep -qE '^[A-Z]{2}$'; then
+        echo "⚠️  警告: 無効な国コード形式: $country_code" >&2
+        return 1
+    fi
+    return 0
+}
+
+# バックエンドホストのバリデーション
 validate_backend_host() {
     local host="$1"
     local fqdn_label="$2"
@@ -21,7 +80,7 @@ validate_backend_host() {
         echo "httpbin.org"
         return
     fi
-    # 許可パターン: 各ラベルが英数字で始まり英数字またはハイフンのみ、英数字で終わる（a..b, a-.com 等を拒否）、localhost、IPv4
+    # 許可パターン
     if echo "$host" | grep -qE '^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$|^localhost$|^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'; then
         # IPv4の各オクテットが0-255であることを確認
         if echo "$host" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'; then
@@ -42,7 +101,7 @@ EOF
     fi
 }
 
-# バックエンドポートのバリデーション（1-65535の整数のみ許可）
+# バックエンドポートのバリデーション
 validate_backend_port() {
     local port="$1"
     local fqdn_label="$2"
@@ -65,189 +124,414 @@ validate_backend_port() {
     fi
 }
 
-# GeoIP設定を生成
-generate_geoip_config() {
+# ========================================
+# 変数名サニタイズ
+# ========================================
+
+# FQDNから変数名を生成（ドットとハイフンをアンダースコアに変換）
+sanitize_fqdn_for_variable() {
+    local fqdn="$1"
+    echo "$fqdn" | tr '.-' '__' | tr '[:upper:]' '[:lower:]'
+}
+
+# ========================================
+# GeoIP設定生成関数
+# ========================================
+
+# X-Forwarded-For設定を生成
+generate_xff_config() {
     local fqdn_config="$1"
-    local fqdn="$2"
+    
+    local xff_enabled
+    xff_enabled=$(echo "$fqdn_config" | jq -r '.geoip.x_forwarded_for.enabled // false')
+    
+    if [ "$xff_enabled" != "true" ]; then
+        return 0
+    fi
+    
+    local trusted_proxies
+    trusted_proxies=$(echo "$fqdn_config" | jq -r '.geoip.x_forwarded_for.trusted_proxies[]? // empty' 2>/dev/null)
+    
+    if [ -z "$trusted_proxies" ]; then
+        return 0
+    fi
+    
+    echo "# X-Forwarded-Forヘッダー処理（信頼できるプロキシ設定）"
+    while IFS= read -r proxy; do
+        if [ -n "$proxy" ] && validate_ip_cidr "$proxy"; then
+            echo "set_real_ip_from $proxy;"
+        fi
+    done <<< "$trusted_proxies"
+    echo "real_ip_header X-Forwarded-For;"
+    echo "real_ip_recursive on;"
+}
+
+# IP AllowList設定を生成
+generate_ip_allowlist() {
+    local fqdn_config="$1"
+    
+    local ip_allowlist
+    ip_allowlist=$(echo "$fqdn_config" | jq -r '.geoip.ip_allowlist[]? // empty' 2>/dev/null)
+    
+    if [ -z "$ip_allowlist" ]; then
+        return 0
+    fi
+    
+    while IFS= read -r ip; do
+        if [ -n "$ip" ] && validate_ip_cidr "$ip"; then
+            echo "    $ip 1;"
+        fi
+    done <<< "$ip_allowlist"
+}
+
+# IP BlockList設定を生成
+generate_ip_blocklist() {
+    local fqdn_config="$1"
+    
+    local ip_blocklist
+    ip_blocklist=$(echo "$fqdn_config" | jq -r '.geoip.ip_blocklist[]? // empty' 2>/dev/null)
+    
+    if [ -z "$ip_blocklist" ]; then
+        return 0
+    fi
+    
+    while IFS= read -r ip; do
+        if [ -n "$ip" ] && validate_ip_cidr "$ip"; then
+            echo "    $ip 1;"
+        fi
+    done <<< "$ip_blocklist"
+}
+
+# 国コード AllowList設定を生成
+generate_country_allowlist() {
+    local fqdn_config="$1"
+    
+    local country_allowlist
+    country_allowlist=$(echo "$fqdn_config" | jq -r '.geoip.country_allowlist[]? // empty' 2>/dev/null)
+    
+    if [ -z "$country_allowlist" ]; then
+        return 0
+    fi
+    
+    while IFS= read -r country; do
+        if [ -n "$country" ] && validate_country_code "$country"; then
+            echo "    $country 1;"
+        fi
+    done <<< "$country_allowlist"
+}
+
+# 国コード BlockList設定を生成
+generate_country_blocklist() {
+    local fqdn_config="$1"
+    
+    local country_blocklist
+    country_blocklist=$(echo "$fqdn_config" | jq -r '.geoip.country_blocklist[]? // empty' 2>/dev/null)
+    
+    if [ -z "$country_blocklist" ]; then
+        return 0
+    fi
+    
+    while IFS= read -r country; do
+        if [ -n "$country" ] && validate_country_code "$country"; then
+            echo "    $country 1;"
+        fi
+    done <<< "$country_blocklist"
+}
+
+# アクセス制御ロジックを生成（アプローチ2: シンプル版）
+generate_access_decision_logic() {
+    local sanitized_fqdn="$1"
+    local fqdn_config="$2"
+    
+    # AllowList/BlockListの有無を確認
+    local has_ip_allowlist has_ip_blocklist has_country_allowlist has_country_blocklist
+    has_ip_allowlist=$(echo "$fqdn_config" | jq -r '.geoip.ip_allowlist | length > 0' 2>/dev/null || echo "false")
+    has_ip_blocklist=$(echo "$fqdn_config" | jq -r '.geoip.ip_blocklist | length > 0' 2>/dev/null || echo "false")
+    has_country_allowlist=$(echo "$fqdn_config" | jq -r '.geoip.country_allowlist | length > 0' 2>/dev/null || echo "false")
+    has_country_blocklist=$(echo "$fqdn_config" | jq -r '.geoip.country_blocklist | length > 0' 2>/dev/null || echo "false")
+    
+    # いずれかのリストが定義されている場合のみアクセス制御ロジックを生成
+    if [ "$has_ip_allowlist" = "false" ] && [ "$has_ip_blocklist" = "false" ] && \
+       [ "$has_country_allowlist" = "false" ] && [ "$has_country_blocklist" = "false" ]; then
+        return 0
+    fi
+    
+    cat << EOF
+
+# 最終的なアクセス許可判定（AllowList優先ロジック - アプローチ2）
+map "\$${sanitized_fqdn}_ip_allowed:\$${sanitized_fqdn}_ip_blocked:\$${sanitized_fqdn}_country_allowed:\$${sanitized_fqdn}_country_blocked" \$${sanitized_fqdn}_access_denied {
+    # IP AllowList優先: 即座に許可
+    "1:0:0:0" 0;  # IP AllowList のみ一致
+    "1:1:0:0" 0;  # IP AllowList + IP BlockList → AllowList優先
+    "1:0:1:0" 0;  # IP AllowList + 国コード AllowList
+    "1:0:0:1" 0;  # IP AllowList + 国コード BlockList → AllowList優先
+    "1:1:1:0" 0;  # IP AllowList + その他 → AllowList優先
+    "1:1:0:1" 0;  # IP AllowList + その他 → AllowList優先
+    "1:0:1:1" 0;  # IP AllowList + その他 → AllowList優先
+    "1:1:1:1" 0;  # すべて一致 → AllowList優先
+    
+    # IP BlockList: 拒否（AllowListがない場合のみ）
+    "0:1:0:0" 1;  # IP BlockList のみ一致
+    "0:1:1:0" 1;  # IP BlockList + 国コード AllowList → BlockList優先
+    "0:1:0:1" 1;  # IP BlockList + 国コード BlockList
+    "0:1:1:1" 1;  # IP BlockList + 国コード両方
+    
+    # 国コード AllowList: 許可（IP判定なし）
+    "0:0:1:0" 0;  # 国コード AllowList のみ一致
+    "0:0:1:1" 0;  # 国コード両方 → AllowList優先
+    
+    # 国コード BlockList: 拒否（AllowListがない場合のみ）
+    "0:0:0:1" 1;  # 国コード BlockList のみ一致
+    
+    # デフォルト: すべて不一致 → 許可（ブラックリストモード）
+    default 0;
+}
+EOF
+}
+
+# ========================================
+# GeoIP設定ファイル生成（httpコンテキスト用）
+# ========================================
+
+generate_geoip_config_file() {
+    local fqdn="$1"
+    local fqdn_config="$2"
+    local output_dir="$3"
+    
+    # FQDN検証
+    if ! validate_fqdn "$fqdn"; then
+        echo "❌ エラー: 無効なFQDN、スキップします: $fqdn" >&2
+        return 1
+    fi
+    
+    local sanitized_fqdn
+    sanitized_fqdn=$(sanitize_fqdn_for_variable "$fqdn")
+    
+    local geoip_file="${output_dir}/geoip/${fqdn}-geoip.conf"
     
     # GeoIP設定が有効かチェック
     local geoip_enabled
     geoip_enabled=$(echo "$fqdn_config" | jq -r '.geoip.enabled // false')
     
-    if [ "$geoip_enabled" != "true" ]; then
-        # GeoIP無効の場合は空文字列を返す
-        echo ""
-        return
+    if [[ "$geoip_enabled" != "true" ]]; then
+        # GeoIP無効の場合、ファイルを削除（存在すれば）
+        rm -f "$geoip_file"
+        return 0
     fi
     
-    # GeoIP設定を構築
-    local geoip_config=""
+    # X-Forwarded-For設定を生成
+    local xff_config
+    xff_config=$(generate_xff_config "$fqdn_config")
     
-    # X-Forwarded-For設定
-    local xff_enabled
-    xff_enabled=$(echo "$fqdn_config" | jq -r '.geoip.x_forwarded_for.enabled // false')
+    # IP AllowList設定を生成
+    local ip_allowlist_entries
+    ip_allowlist_entries=$(generate_ip_allowlist "$fqdn_config")
     
-    if [ "$xff_enabled" = "true" ]; then
-        # 信頼できるプロキシのIPレンジを取得
-        local trusted_proxies
-        trusted_proxies=$(echo "$fqdn_config" | jq -r '.geoip.x_forwarded_for.trusted_proxies[]? // empty' 2>/dev/null)
-        
-        if [ -n "$trusted_proxies" ]; then
-            geoip_config+="
-    # X-Forwarded-Forから実IPを取得
-    # 信頼できるプロキシからのX-Forwarded-Forヘッダーを使用
-"
-            while IFS= read -r proxy; do
-                geoip_config+="    set_real_ip_from $proxy;
-"
-            done <<< "$trusted_proxies"
-            
-            geoip_config+="    real_ip_header X-Forwarded-For;
-    real_ip_recursive on;
-"
-        fi
+    # IP BlockList設定を生成
+    local ip_blocklist_entries
+    ip_blocklist_entries=$(generate_ip_blocklist "$fqdn_config")
+    
+    # 国コード AllowList設定を生成
+    local country_allowlist_entries
+    country_allowlist_entries=$(generate_country_allowlist "$fqdn_config")
+    
+    # 国コード BlockList設定を生成
+    local country_blocklist_entries
+    country_blocklist_entries=$(generate_country_blocklist "$fqdn_config")
+    
+    # アクセス制御ロジックを生成
+    local access_logic
+    access_logic=$(generate_access_decision_logic "$sanitized_fqdn" "$fqdn_config")
+    
+    # GeoIP設定ファイルを生成
+    cat > "$geoip_file" << EOF
+# GeoIP設定: ${fqdn}
+# 自動生成: $(date '+%Y-%m-%d %H:%M:%S')
+# このファイルはhttpコンテキストにincludeされます
+
+EOF
+
+    # X-Forwarded-For設定を出力
+    if [ -n "$xff_config" ]; then
+        cat >> "$geoip_file" << EOF
+$xff_config
+
+EOF
     fi
     
-    # IP AllowList設定
-    local ip_allowlist
-    ip_allowlist=$(echo "$fqdn_config" | jq -r '.geoip.ip_allowlist[]? // empty' 2>/dev/null)
-    
-    if [ -n "$ip_allowlist" ]; then
-        geoip_config+="
-    # IP AllowList（geoディレクティブ）
-    geo \$ip_allowlist {
-        default 0;
-"
-        while IFS= read -r ip; do
-            geoip_config+="        $ip 1;
-"
-        done <<< "$ip_allowlist"
-        
-        geoip_config+="    }
-"
+    # IP AllowList判定
+    cat >> "$geoip_file" << EOF
+# IP/CIDR AllowList判定
+geo \$${sanitized_fqdn}_ip_allowed {
+    default 0;
+EOF
+    if [ -n "$ip_allowlist_entries" ]; then
+        echo "$ip_allowlist_entries" >> "$geoip_file"
     fi
-    
-    # IP BlockList設定
-    local ip_blocklist
-    ip_blocklist=$(echo "$fqdn_config" | jq -r '.geoip.ip_blocklist[]? // empty' 2>/dev/null)
-    
-    if [ -n "$ip_blocklist" ]; then
-        geoip_config+="
-    # IP BlockList（geoディレクティブ）
-    geo \$ip_blocklist {
-        default 0;
-"
-        while IFS= read -r ip; do
-            geoip_config+="        $ip 1;
-"
-        done <<< "$ip_blocklist"
-        
-        geoip_config+="    }
-"
-    fi
-    
-    # 国コード AllowList設定
-    local country_allowlist
-    country_allowlist=$(echo "$fqdn_config" | jq -r '.geoip.country_allowlist[]? // empty' 2>/dev/null)
-    
-    if [ -n "$country_allowlist" ]; then
-        geoip_config+="
-    # 国コード AllowList（mapディレクティブ）
-    map \$geoip2_data_country_iso_code \$country_allowlist {
-        default 0;
-"
-        while IFS= read -r country; do
-            geoip_config+="        $country 1;
-"
-        done <<< "$country_allowlist"
-        
-        geoip_config+="    }
-"
-    fi
-    
-    # 国コード BlockList設定
-    local country_blocklist
-    country_blocklist=$(echo "$fqdn_config" | jq -r '.geoip.country_blocklist[]? // empty' 2>/dev/null)
-    
-    if [ -n "$country_blocklist" ]; then
-        geoip_config+="
-    # 国コード BlockList（mapディレクティブ）
-    map \$geoip2_data_country_iso_code \$country_blocklist {
-        default 0;
-"
-        while IFS= read -r country; do
-            geoip_config+="        $country 1;
-"
-        done <<< "$country_blocklist"
-        
-        geoip_config+="    }
-"
-    fi
-    
-    # アクセス制御ロジック
-    local allowlist_priority
-    allowlist_priority=$(echo "$fqdn_config" | jq -r '.geoip.allowlist_priority // true')
-    
-    if [ -n "$ip_allowlist" ] || [ -n "$country_allowlist" ] || [ -n "$ip_blocklist" ] || [ -n "$country_blocklist" ]; then
-        geoip_config+="
-    # アクセス制御ロジック
-    set \$access_allowed 1;  # デフォルトは許可
-"
-        
-        if [ "$allowlist_priority" = "true" ] && ([ -n "$ip_allowlist" ] || [ -n "$country_allowlist" ]); then
-            geoip_config+="
-    # AllowListが定義されている場合、デフォルトを拒否に変更
-"
-            if [ -n "$ip_allowlist" ]; then
-                geoip_config+="    if (\$ip_allowlist) {
-        set \$access_allowed 0;
-    }
-"
-            fi
-            if [ -n "$country_allowlist" ]; then
-                geoip_config+="    if (\$country_allowlist) {
-        set \$access_allowed 0;
-    }
-"
-            fi
-            
-            geoip_config+="
-    # IP AllowListに含まれる場合は許可
-    if (\$ip_allowlist = \"1\") {
-        set \$access_allowed 1;
-    }
-    
-    # 国コード AllowListに含まれる場合は許可
-    if (\$country_allowlist = \"1\") {
-        set \$access_allowed 1;
-    }
-"
-        fi
-        
-        # BlockList判定
-        geoip_config+="
-    # IP BlockListに含まれる場合は拒否
-    if (\$ip_blocklist = \"1\") {
-        set \$access_allowed 0;
-    }
-    
-    # 国コード BlockListに含まれる場合は拒否
-    if (\$country_blocklist = \"1\") {
-        set \$access_allowed 0;
-    }
-    
-    # アクセス拒否
-    if (\$access_allowed = \"0\") {
-        return 403 '{\"error\": \"Access denied\", \"reason\": \"GeoIP policy violation\"}';
-        add_header Content-Type application/json always;
-    }
-"
-    fi
-    
-    echo "$geoip_config"
+    cat >> "$geoip_file" << EOF
 }
 
-# Nginx設定ファイルを生成
+EOF
+    
+    # IP BlockList判定
+    cat >> "$geoip_file" << EOF
+# IP/CIDR BlockList判定
+geo \$${sanitized_fqdn}_ip_blocked {
+    default 0;
+EOF
+    if [ -n "$ip_blocklist_entries" ]; then
+        echo "$ip_blocklist_entries" >> "$geoip_file"
+    fi
+    cat >> "$geoip_file" << EOF
+}
+
+EOF
+    
+    # 国コード AllowList判定
+    cat >> "$geoip_file" << EOF
+# 国コード AllowList判定
+map \$geoip2_data_country_iso_code \$${sanitized_fqdn}_country_allowed {
+    default 0;
+EOF
+    if [ -n "$country_allowlist_entries" ]; then
+        echo "$country_allowlist_entries" >> "$geoip_file"
+    fi
+    cat >> "$geoip_file" << EOF
+}
+
+EOF
+    
+    # 国コード BlockList判定
+    cat >> "$geoip_file" << EOF
+# 国コード BlockList判定
+map \$geoip2_data_country_iso_code \$${sanitized_fqdn}_country_blocked {
+    default 0;
+EOF
+    if [ -n "$country_blocklist_entries" ]; then
+        echo "$country_blocklist_entries" >> "$geoip_file"
+    fi
+    cat >> "$geoip_file" << EOF
+}
+EOF
+    
+    # アクセス制御ロジックを出力
+    if [ -n "$access_logic" ]; then
+        echo "$access_logic" >> "$geoip_file"
+    fi
+    
+    echo "✅ GeoIP設定ファイルを生成しました: $geoip_file"
+}
+
+# ========================================
+# FQDN設定ファイル生成（serverコンテキスト用）
+# ========================================
+
+generate_fqdn_config_file() {
+    local fqdn="$1"
+    local fqdn_config="$2"
+    local customer_name="$3"
+    local output_dir="$4"
+    
+    # FQDN検証
+    if ! validate_fqdn "$fqdn"; then
+        echo "❌ エラー: 無効なFQDN、スキップします: $fqdn" >&2
+        return 1
+    fi
+    
+    local sanitized_fqdn
+    sanitized_fqdn=$(sanitize_fqdn_for_variable "$fqdn")
+    
+    # バックエンド設定を取得（バリデーション済み）
+    local backend_host_raw
+    backend_host_raw=$(echo "$fqdn_config" | jq -r '.backend_host // "httpbin.org"')
+    if [ $? -ne 0 ] || [ -z "$backend_host_raw" ] || [ "$backend_host_raw" = "null" ]; then
+        backend_host_raw="httpbin.org"
+    fi
+    local backend_host
+    backend_host=$(validate_backend_host "$backend_host_raw" "$fqdn")
+
+    local backend_port_raw
+    backend_port_raw=$(echo "$fqdn_config" | jq -r '.backend_port // 80')
+    if [ $? -ne 0 ] || [ -z "$backend_port_raw" ] || [ "$backend_port_raw" = "null" ]; then
+        backend_port_raw="80"
+    fi
+    local backend_port
+    backend_port=$(validate_backend_port "$backend_port_raw" "$fqdn")
+    
+    # バックエンドURLを構築
+    local backend_url
+    backend_url="http://${backend_host}:${backend_port}"
+    
+    local config_file="${output_dir}/conf.d/${fqdn}.conf"
+    
+    # FQDN別ログディレクトリを作成
+    local log_dir="/var/log/nginx/${fqdn}"
+    if ! mkdir -p "$log_dir" 2>/dev/null; then
+        echo "⚠️  警告: ログディレクトリの作成に失敗しました: $log_dir" >&2
+    fi
+    
+    # GeoIP設定が有効かチェック
+    local geoip_enabled
+    geoip_enabled=$(echo "$fqdn_config" | jq -r '.geoip.enabled // false')
+    
+    # GeoIPアクセス制御ブロックを生成
+    local geoip_access_control=""
+    if [[ "$geoip_enabled" == "true" ]]; then
+        geoip_access_control="
+    # GeoIPアクセス制御
+    if (\$${sanitized_fqdn}_access_denied = 1) {
+        return 403;
+    }"
+    fi
+    
+    # FQDN設定ファイルを生成
+    cat > "$config_file" << EOF
+# FQDN設定: ${fqdn}
+# 自動生成: $(date '+%Y-%m-%d %H:%M:%S')
+
+server {
+    listen 80;
+    server_name ${fqdn};
+
+    # 顧客名を変数に設定（ログフォーマットで使用）
+    set \$customer_name "${customer_name}";
+${geoip_access_control}
+
+    # アクセスログ（FQDN別ディレクトリ、JSON形式）
+    access_log /var/log/nginx/${fqdn}/access.log json_combined;
+    error_log /var/log/nginx/${fqdn}/error.log warn;
+
+    location / {
+        # バックエンドへのプロキシ
+        proxy_pass ${backend_url};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-GeoIP-Country \$geoip2_data_country_iso_code;
+
+        # タイムアウト設定
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    # ヘルスチェック用エンドポイント
+    location /health {
+        access_log off;
+        return 200 "healthy\n";
+        add_header Content-Type text/plain;
+    }
+}
+EOF
+    
+    echo "✅ FQDN設定ファイルを生成しました: $config_file"
+}
+
+# ========================================
+# メイン設定生成関数
+# ========================================
+
 generate_nginx_configs() {
     local config_data="$1"
     local output_dir="$2"
@@ -258,7 +542,8 @@ generate_nginx_configs() {
     fi
     
     # 出力ディレクトリを作成
-    mkdir -p "$output_dir"
+    mkdir -p "${output_dir}/conf.d"
+    mkdir -p "${output_dir}/geoip"
     
     # JSON形式の検証
     if ! echo "$config_data" | jq empty 2>/dev/null; then
@@ -267,6 +552,16 @@ generate_nginx_configs() {
         echo "❌ エラー: 設定データが有効なJSON形式ではありません" >&2
         echo "❌ JSONエラー詳細: $json_error" >&2
         return 1
+    fi
+    
+    # 顧客名を取得
+    local customer_name
+    if ! customer_name=$(echo "$config_data" | jq -r '.customer_name // "default"'); then
+        echo "⚠️  警告: customer_nameの取得中にjqエラーが発生しました。デフォルト値を使用します" >&2
+        customer_name="default"
+    elif [ -z "$customer_name" ] || [ "$customer_name" = "null" ]; then
+        echo "⚠️  警告: customer_nameが設定されていません。デフォルト値を使用します" >&2
+        customer_name="default"
     fi
     
     # アクティブなFQDNのリストを取得
@@ -319,119 +614,16 @@ generate_nginx_configs() {
         trap - RETURN
         rm -f "$jq_error"
         
-        # バックエンド設定を取得（API値はバリデーション・サニタイズを適用）
-        local backend_host_raw
-        backend_host_raw=$(echo "$fqdn_config" | jq -r '.backend_host // "httpbin.org"')
-        if [ $? -ne 0 ] || [ -z "$backend_host_raw" ] || [ "$backend_host_raw" = "null" ]; then
-            backend_host_raw="httpbin.org"
-        fi
-        local backend_host
-        backend_host=$(validate_backend_host "$backend_host_raw" "$fqdn")
-
-        local backend_port_raw
-        backend_port_raw=$(echo "$fqdn_config" | jq -r '.backend_port // 80')
-        if [ $? -ne 0 ] || [ -z "$backend_port_raw" ] || [ "$backend_port_raw" = "null" ]; then
-            backend_port_raw="80"
-        fi
-        local backend_port
-        backend_port=$(validate_backend_port "$backend_port_raw" "$fqdn")
+        # GeoIP設定ファイルを生成（httpコンテキスト用）
+        generate_geoip_config_file "$fqdn" "$fqdn_config" "$output_dir"
         
-        local backend_path
-        backend_path=$(echo "$fqdn_config" | jq -r '.backend_path // ""')
-        if [ $? -ne 0 ]; then
-            echo "⚠️  警告: FQDN '$fqdn' のbackend_pathが取得できません。空文字列を使用します" >&2
-            backend_path=""
-        fi
-        
-        # 顧客名を取得（ログに含めるため）
-        local customer_name
-        if ! customer_name=$(echo "$config_data" | jq -r '.customer_name // "default"'); then
-            echo "⚠️  警告: customer_nameの取得中にjqエラーが発生しました。デフォルト値を使用します" >&2
-            customer_name="default"
-        elif [ -z "$customer_name" ] || [ "$customer_name" = "null" ]; then
-            echo "⚠️  警告: customer_nameが設定されていません。デフォルト値を使用します" >&2
-            customer_name="default"
-        fi
-        
-        # バックエンドURLを構築
-        # 注意: RateLimit機能をテストするため、パスを保持する必要がある
-        # proxy_passの末尾にパスを含めないことで、リクエストパスが保持される
-        local backend_url
-        backend_url="http://${backend_host}:${backend_port}"
-        
-        local config_file="${output_dir}/${fqdn}.conf"
-        
-        # FQDN別ログディレクトリを作成（Nginx起動時に必要）
-        # 注意: /var/log/nginxはdocker-compose.ymlでマウントされている必要がある
-        local log_dir="/var/log/nginx/${fqdn}"
-        if ! mkdir -p "$log_dir" 2>/dev/null; then
-            echo "⚠️  警告: ログディレクトリの作成に失敗しました: $log_dir" >&2
-            echo "⚠️  注意: docker-compose.ymlでNginxログボリュームがマウントされていることを確認してください" >&2
-        else
-            echo "✅ ログディレクトリを作成しました: $log_dir"
-        fi
-        
-        # GeoIP設定を生成
-        local geoip_config
-        geoip_config=$(generate_geoip_config "$fqdn_config" "$fqdn")
-        
-        # Nginx設定ファイルを生成
-        if ! cat > "$config_file" << EOF
-# FQDN設定: ${fqdn}
-# 自動生成: $(date +'%Y-%m-%d %H:%M:%S')
-
-server {
-    listen 80;
-    server_name ${fqdn};
-
-    # 顧客名を変数に設定（ログフォーマットで使用）
-    set \$customer_name "${customer_name}";
-${geoip_config}
-    # アクセスログ（FQDN別ディレクトリ、JSON形式）
-    # ログディレクトリを自動作成（Nginx起動時に必要）
-    access_log /var/log/nginx/${fqdn}/access.log json_combined;
-    error_log /var/log/nginx/${fqdn}/error.log warn;
-
-    location / {
-        # バックエンドへのプロキシ
-        proxy_pass ${backend_url};
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_set_header X-GeoIP-Country \$geoip2_data_country_iso_code;
-
-        # タイムアウト設定
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-    }
-
-    # ヘルスチェック用エンドポイント
-    location /health {
-        access_log off;
-        return 200 "healthy\n";
-        add_header Content-Type text/plain;
-    }
-}
-EOF
-        then
-            echo "❌ エラー: Nginx設定ファイルの書き込みに失敗しました: $config_file" >&2
-            continue
-        fi
-        
-        # ファイル生成の確認
-        if [ ! -f "$config_file" ] || [ ! -s "$config_file" ]; then
-            echo "❌ エラー: Nginx設定ファイルが正しく生成されませんでした: $config_file" >&2
-            continue
-        fi
-        
-        echo "✅ Nginx設定ファイルを生成しました: $config_file"
+        # FQDN設定ファイルを生成（serverコンテキスト用）
+        generate_fqdn_config_file "$fqdn" "$fqdn_config" "$customer_name" "$output_dir"
     done
     
     # 無効化されたFQDNの設定ファイルを削除
     local all_config_files
-    all_config_files=$(find "$output_dir" -name "*.conf" -type f 2>/dev/null || true)
+    all_config_files=$(find "${output_dir}/conf.d" -name "*.conf" -type f 2>/dev/null || true)
     
     if [ -n "$all_config_files" ]; then
         echo "$all_config_files" | while read -r config_file; do
@@ -442,6 +634,23 @@ EOF
             if ! echo "$active_fqdns" | grep -q "^${fqdn_from_file}$"; then
                 echo "🗑️  無効化されたFQDNの設定ファイルを削除: $config_file"
                 rm -f "$config_file"
+            fi
+        done
+    fi
+    
+    # 無効化されたFQDNのGeoIP設定ファイルを削除
+    local all_geoip_files
+    all_geoip_files=$(find "${output_dir}/geoip" -name "*-geoip.conf" -type f 2>/dev/null || true)
+    
+    if [ -n "$all_geoip_files" ]; then
+        echo "$all_geoip_files" | while read -r geoip_file; do
+            local fqdn_from_file
+            fqdn_from_file=$(basename "$geoip_file" -geoip.conf)
+            
+            # アクティブなFQDNリストに含まれているか確認
+            if ! echo "$active_fqdns" | grep -q "^${fqdn_from_file}$"; then
+                echo "🗑️  無効化されたFQDNのGeoIP設定ファイルを削除: $geoip_file"
+                rm -f "$geoip_file"
             fi
         done
     fi
