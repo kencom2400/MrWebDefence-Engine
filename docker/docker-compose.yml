@@ -57,9 +57,10 @@ services:
 
   openappsec-agent:
     # OpenAppSec公式のAgentイメージ
-    # 1.1.32固定: Issue #397 (AccessControlPractice/rateLimit の assetId バグ) 解消まで
+    # デフォルト: latest（CI・ローカルテストで利用。1.1.32-open-source は GHCR に存在しないため）
+    # Issue #397 解消後に特定タグで固定する場合は OPENAPPSEC_AGENT_IMAGE で指定
     # https://github.com/openappsec/openappsec/issues/397
-    image: ghcr.io/openappsec/agent:1.1.32-open-source
+    image: ${OPENAPPSEC_AGENT_IMAGE:-ghcr.io/openappsec/agent:latest}
     platform: linux/amd64
     container_name: mwd-openappsec-agent
     volumes:

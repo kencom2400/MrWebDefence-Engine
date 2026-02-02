@@ -246,8 +246,16 @@ HTTP_TEST_FAILED=0
 for fqdn in "${FQDNS[@]}"; do
     echo "テスト: ${fqdn}"
     
-    # ヘルスチェックエンドポイント
-    if curl -s -m 5 -H "Host: ${fqdn}" http://localhost/health > /dev/null 2>&1; then
+    # ヘルスチェックエンドポイント（CI時は1回失敗でリトライ）
+    HEALTH_OK=0
+    for retry in 1 2; do
+      if curl -s -m 5 -H "Host: ${fqdn}" http://localhost/health > /dev/null 2>&1; then
+        HEALTH_OK=1
+        break
+      fi
+      [ "$CI_MODE" = "true" ] && [ "$retry" -eq 1 ] && sleep 2
+    done
+    if [ "$HEALTH_OK" -eq 1 ]; then
         echo "  ✅ ヘルスチェック: OK"
         increment_success
     else
@@ -269,9 +277,11 @@ for fqdn in "${FQDNS[@]}"; do
     fi
 done
 
-# 少し待機してログが書き込まれるのを待つ
-echo "🔄 ログの書き込みを待機中（3秒）..."
-sleep 3
+# 少し待機してログが書き込まれるのを待つ（CI時は長めに）
+WAIT_SEC=3
+[ "$CI_MODE" = "true" ] && WAIT_SEC=5
+echo "🔄 ログの書き込みを待機中（${WAIT_SEC}秒）..."
+sleep "$WAIT_SEC"
 echo ""
 
 # 6. NginxログのJSON形式確認
@@ -283,12 +293,26 @@ for fqdn in "${FQDNS[@]}"; do
     if [ -f "$access_log" ] && [ -s "$access_log" ]; then
         echo "確認: ${fqdn}"
         
-        # 最新のログエントリを取得
+        # 最新のログエントリを取得（CI時は1回失敗で2秒待って再取得）
         latest_log=$(tail -n 1 "$access_log" 2>/dev/null || echo "")
+        if [ "$CI_MODE" = "true" ] && [ -z "$latest_log" ]; then
+          sleep 2
+          latest_log=$(tail -n 1 "$access_log" 2>/dev/null || echo "")
+        fi
         
         if [ -n "$latest_log" ]; then
-            # JSON形式かどうかを確認
+            # JSON形式かどうかを確認（CI時は1回パース失敗で2秒待って再検証）
+            JSON_VALID=0
             if echo "$latest_log" | jq empty > /dev/null 2>&1; then
+              JSON_VALID=1
+            elif [ "$CI_MODE" = "true" ]; then
+              sleep 2
+              latest_log=$(tail -n 1 "$access_log" 2>/dev/null || echo "")
+              if echo "$latest_log" | jq empty > /dev/null 2>&1; then
+                JSON_VALID=1
+              fi
+            fi
+            if [ "$JSON_VALID" -eq 1 ]; then
                 echo "  ✅ JSON形式のログが正しく出力されています"
                 increment_success
                 
