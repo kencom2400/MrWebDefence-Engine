@@ -1,11 +1,7 @@
-# OpenAppSec Nginx Attachment with GeoIP2 Module
-# Base: OpenAppSec公式のNginxイメージ（Attachment Moduleが組み込まれている）
+# ================================================
+# Stage 1: Builder - GeoIP2モジュールのビルド
+# ================================================
 FROM ghcr.io/openappsec/nginx-attachment:latest AS builder
-
-# メンテナンス情報
-LABEL maintainer="MrWebDefence Team"
-LABEL description="OpenAppSec Nginx with GeoIP2 Module"
-LABEL version="1.0.0"
 
 # 環境変数
 ENV GEOIP2_MODULE_VERSION=3.4
@@ -60,14 +56,24 @@ RUN cd /tmp && \
     \
     # クリーンアップ
     cd /tmp && \
-    rm -rf nginx-* ${GEOIP2_MODULE_VERSION}.tar.gz && \
-    apk del \
-    build-base \
-    wget \
-    git \
-    autoconf \
-    automake \
-    libtool
+    rm -rf nginx-* ${GEOIP2_MODULE_VERSION}.tar.gz
+
+# ================================================
+# Stage 2: Final - 軽量な本番イメージ
+# ================================================
+FROM ghcr.io/openappsec/nginx-attachment:latest
+
+# メンテナンス情報
+LABEL maintainer="MrWebDefence Team"
+LABEL description="OpenAppSec Nginx with GeoIP2 Module"
+LABEL version="1.0.0"
+
+# libmaxminddb実行時ライブラリのインストール（ビルドツールは不要）
+RUN apk add --no-cache libmaxminddb
+
+# builderステージからコンパイル済みモジュールと依存ライブラリをコピー
+COPY --from=builder /usr/lib/nginx/modules/ngx_http_geoip2_module.so /usr/lib/nginx/modules/
+COPY --from=builder /usr/lib/libmaxminddb.so* /usr/lib/
 
 # GeoIPデータベース用ディレクトリの作成
 RUN mkdir -p /usr/share/GeoIP && \
