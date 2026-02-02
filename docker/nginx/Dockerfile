@@ -91,20 +91,19 @@ RUN cd /tmp && \
     make modules && \
     cp objs/ngx_http_geoip2_module.so /usr/lib/nginx/modules/ && \
     \
-    # クリーンアップとライブラリパス設定
+    # クリーンアップ（ライブラリパス設定前に実行）
     cd /tmp && \
     rm -rf nginx-${NGINX_VERSION}* ${GEOIP2_MODULE_VERSION}.tar.gz && \
-    echo "/usr/local/lib" >> /etc/ld-musl-x86_64.path
-
-# クリーンアップ
-RUN apk del \
+    apk del \
     build-base \
     wget \
     git \
     autoconf \
     automake \
-    libtool \
-    && rm -rf /tmp/*
+    libtool && \
+    \
+    # ライブラリパス設定（最後に実行）
+    echo "/usr/local/lib" >> /etc/ld-musl-x86_64.path
 
 # GeoIPデータベース用ディレクトリの作成
 RUN mkdir -p /usr/share/GeoIP && \
