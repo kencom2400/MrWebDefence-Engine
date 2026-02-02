@@ -268,6 +268,55 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  health-api:
+    # ヘルスチェックAPIサーバー
+    build:
+      context: ./health-api
+      dockerfile: Dockerfile
+    container_name: mwd-health-api
+    volumes:
+      # ヘルスチェックスクリプト
+      - ../scripts/openappsec/health-check.sh:/app/scripts/health-check.sh:ro
+      # Dockerソケット（コンテナ状態確認用）
+      # セキュリティ警告: Dockerソケットへのアクセスにより、
+      # 他のコンテナの情報（設定、メタデータ、環境変数）を読み取り可能。
+      # 本番環境では以下の対策を必ず実施すること:
+      # 1. HEALTH_API_TOKENを設定（必須）
+      # 2. ALLOW_UNAUTHENTICATED=false を設定（デフォルト）
+      # 3. ポート公開を削除し、内部ネットワーク経由でのみアクセス許可
+      # 4. ネットワークアクセス制限（ファイアウォール・セキュリティグループ）
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # docker-composeファイル（health-check.shで使用）
+      - ./docker-compose.yml:/app/docker/docker-compose.yml:ro
+    environment:
+      - HEALTH_API_PORT=8888
+      - HEALTH_CHECK_TIMEOUT=10  # ヘルスチェックタイムアウト（秒、デフォルト10秒）
+      - HEALTH_CHECK_CWD=/app/docker  # health-check.sh実行時の作業ディレクトリ
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}  # Redis認証パスワード（health-check.shで使用）
+      - HEALTH_API_TOKEN=${HEALTH_API_TOKEN:-}  # API認証トークン（本番環境では必須）
+      # Fail-Closed原則: トークン未設定時は起動しない（デフォルト）
+      # 開発環境で認証なしで起動する場合のみ ALLOW_UNAUTHENTICATED=true を設定
+      - ALLOW_UNAUTHENTICATED=${ALLOW_UNAUTHENTICATED:-false}
+    # セキュリティ: 本番環境ではポート公開をデフォルトで無効化
+    # 内部ネットワーク経由でのみアクセス可能（他のコンテナから health-api:8888 でアクセス）
+    # 開発環境でホストからアクセスする場合は docker-compose.override.yml でポートを公開
+    # ports:
+    #   - "8888:8888"
+    networks:
+      - mwd-network
+    depends_on:
+      - nginx
+      - openappsec-agent
+      - config-agent
+      - redis
+      - fluentd
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   # 共有メモリ用のtmpfsボリューム
   # OpenAppSec AgentとNginx間のIPC通信に使用

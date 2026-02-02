@@ -12997,3 +12997,1435 @@ logging.basicConfig(
 
 ---
 
+
+## 28. ヘルスチェック機能実装のセキュリティ強化（PR #48）
+
+### 28-1. コマンドインジェクション脆弱性対策（Redis認証） 🔴 Security-Medium
+
+**問題**: シェル変数が引用符なしで使用されると、シェルメタ文字によるコマンドインジェクションの脆弱性が発生する
+
+**脆弱な実装**:
+```bash
+# ❌ 悪い例: 引用符なしの変数展開
+local redis_auth_arg=""
+if [ -n "$REDIS_PASSWORD" ]; then
+    redis_auth_arg="-a $REDIS_PASSWORD"
+fi
+
+# REDIS_PASSWORD に ";rm -rf /" などが含まれるとコマンドインジェクション発生
+if docker-compose exec -T redis redis-cli ${redis_auth_arg} ping; then
+    ...
+fi
+```
+
+**問題点**:
+- `REDIS_PASSWORD`にシェルメタ文字（`;`, `&`, `|`, `$(...)`）が含まれると任意のコマンド実行が可能
+- スペースや特殊文字による意図しないワードスプリッティング
+- `-a`フラグでパスワードがプロセスリストに表示される
+
+**安全な実装**:
+```bash
+# ✅ 良い例: Bash配列を使用して安全に引数を渡す
+local redis_auth_args=()
+if [ -n "$REDIS_PASSWORD" ]; then
+    redis_auth_args=("-a" "$REDIS_PASSWORD")
+fi
+
+if docker-compose exec -T redis redis-cli "${redis_auth_args[@]}" ping >/dev/null 2>&1; then
+    health_status["redis_connection"]="ok"
+else
+    health_status["redis_connection"]="failed"
+    error_messages["redis_connection"]="Redisへの接続に失敗しました"
+fi
+```
+
+**Bash配列のメリット**:
+- **コマンドインジェクション防止**: 各要素が個別の引数として扱われる
+- **ワードスプリッティング防止**: スペースや特殊文字が正しく処理される
+- **引用符の適切な処理**: `"${array[@]}"`で配列を安全に展開
+
+**一般的なパターン**:
+```bash
+# ユーザー入力や環境変数を含むコマンドの構築
+local cmd_args=()
+
+# 条件付き引数の追加
+if [ -n "$AUTH_TOKEN" ]; then
+    cmd_args+=(--auth "$AUTH_TOKEN")
+fi
+
+if [ "$VERBOSE" = "true" ]; then
+    cmd_args+=(--verbose)
+fi
+
+# 安全にコマンドを実行
+some_command "${cmd_args[@]}" "$user_input"
+```
+
+**参照**: PR #48 - Task 5.6: ヘルスチェック機能実装（Gemini Code Assistセキュリティレビュー）
+
+---
+
+### 28-2. 内部エラー詳細の情報漏洩対策（stderr） 🔴 Security-Medium
+
+**問題**: APIレスポンスに`stderr`などの内部エラー詳細を含めると、システム構成やファイルパス、内部エラーメッセージが漏洩する
+
+**脆弱な実装**:
+```python
+# ❌ 悪い例: stderrをそのままレスポンスに含める
+except json.JSONDecodeError:
+    health_data = {
+        "status": "unhealthy",
+        "message": "Health check script failed",
+        "stderr": result.stderr  # 内部エラー詳細が漏洩
+    }
+    
+    self.send_response(503)
+    self.send_header('Content-Type', 'application/json')
+    self.end_headers()
+    self.wfile.write(json.dumps(health_data, indent=2).encode('utf-8'))
+```
+
+**漏洩する情報の例**:
+```
+/app/scripts/health-check.sh: line 12: cd: //docker: No such file or directory
+docker-compose: command not found
+redis-cli: connection refused (role: master)
+```
+
+**安全な実装**:
+```python
+# ✅ 良い例: 内部エラーはログに記録、レスポンスは汎用メッセージのみ
+except json.JSONDecodeError:
+    # セキュリティ: 内部エラー詳細を漏洩させない
+    logger.error(f"Health check script failed: {result.stderr}")
+    health_data = {
+        "status": "unhealthy",
+        "message": "Health check script failed"
+    }
+    
+    self.send_response(503)
+    self.send_header('Content-Type', 'application/json')
+    self.end_headers()
+    self.wfile.write(json.dumps(health_data, indent=2).encode('utf-8'))
+```
+
+**ベストプラクティス**:
+- **内部エラー**: ログに記録（管理者のみアクセス可能）
+- **外部レスポンス**: 汎用的なエラーメッセージのみ
+- **ログレベル**: ERROR以上でスタックトレースも記録
+
+**一般的なパターン**:
+```python
+try:
+    # 処理
+    result = some_operation()
+except SpecificError as e:
+    # 内部ログに詳細を記録
+    logger.error(f"Operation failed: {e}", exc_info=True)
+    
+    # 外部には汎用メッセージのみ
+    return {"status": "error", "message": "Operation failed"}
+```
+
+**参照**: PR #48 - Task 5.6: ヘルスチェック機能実装（Gemini Code Assistセキュリティレビュー）
+
+---
+
+### 28-3. 例外メッセージの情報漏洩対策 🔴 Security-Medium
+
+**問題**: 例外の文字列表現（`str(e)`）をレスポンスに含めると、内部実装の詳細やスタックトレース情報が漏洩する
+
+**脆弱な実装**:
+```python
+# ❌ 悪い例: 例外メッセージをそのままレスポンスに含める
+except Exception as e:
+    logger.exception("Unexpected error during health check")
+    self.send_response(500)
+    self.send_header('Content-Type', 'application/json')
+    self.end_headers()
+    self.wfile.write(json.dumps({
+        "status": "error",
+        "message": str(e)  # 内部例外詳細が漏洩
+    }).encode('utf-8'))
+```
+
+**漏洩する情報の例**:
+```
+FileNotFoundError: [Errno 2] No such file or directory: '/app/scripts/health-check.sh'
+PermissionError: [Errno 13] Permission denied: '/var/run/docker.sock'
+ConnectionRefusedError: [Errno 111] Connection refused
+```
+
+**安全な実装**:
+```python
+# ✅ 良い例: 汎用的なエラーメッセージのみ、詳細はログに記録
+except Exception as e:
+    # セキュリティ: 内部例外詳細を漏洩させない
+    logger.exception("Unexpected error during health check")
+    self.send_response(500)
+    self.send_header('Content-Type', 'application/json')
+    self.end_headers()
+    self.wfile.write(json.dumps({
+        "status": "error",
+        "message": "Internal server error"
+    }).encode('utf-8'))
+```
+
+**セキュリティ原則**:
+- **最小限の情報開示**: 必要最小限の情報のみを外部に公開
+- **詳細なロギング**: 管理者向けにログファイルに詳細を記録
+- **汎用的なエラーメッセージ**: "Internal server error", "Operation failed"など
+
+**環境別の対応**:
+```python
+import os
+
+DEBUG_MODE = os.environ.get('DEBUG', 'false').lower() == 'true'
+
+try:
+    # 処理
+    result = some_operation()
+except Exception as e:
+    logger.exception("Unexpected error")
+    
+    if DEBUG_MODE:
+        # 開発環境: 詳細なエラーメッセージ（デバッグ用）
+        error_message = str(e)
+    else:
+        # 本番環境: 汎用的なエラーメッセージ
+        error_message = "Internal server error"
+    
+    return {"status": "error", "message": error_message}
+```
+
+**注意**: `DEBUG_MODE`は開発環境のみで使用し、本番環境では必ず無効にする
+
+**参照**: PR #48 - Task 5.6: ヘルスチェック機能実装（Gemini Code Assistセキュリティレビュー）
+
+---
+
+## Gemini Code Assistセキュリティレビューの教訓（PR #48）
+
+### レビューサマリー
+
+PR #48のヘルスチェック機能実装に対して、Geminiから3つの重要なセキュリティ指摘を受けました。
+
+#### 指摘内容
+1. **コマンドインジェクション脆弱性** (Security-Medium)
+   - Redis認証での引用符なし変数展開
+   - シェルメタ文字による任意コマンド実行のリスク
+
+2. **内部エラー詳細の漏洩** (Security-Medium)
+   - `stderr`をAPIレスポンスに含めることでシステム情報漏洩
+   - ファイルパス、内部エラーメッセージの露出
+
+3. **例外メッセージの漏洩** (Security-Medium)
+   - `str(e)`をレスポンスに含めることで実装詳細漏洩
+   - スタックトレース情報の露出
+
+### 学んだこと
+
+#### 1. セキュリティはデフォルトで考慮すべき
+- 機能実装時に最初からセキュリティを考慮する
+- 「後で対応」ではなく、設計段階から組み込む
+
+#### 2. 外部に公開する情報は最小限に
+- **内部詳細はログへ**: 管理者のみアクセス可能
+- **外部レスポンスは汎用的**: "Internal server error"など
+
+#### 3. シェルスクリプトの落とし穴
+- 引用符なしの変数展開は危険
+- Bash配列を使用して安全に引数を構築
+- ユーザー入力や環境変数は常に疑う
+
+#### 4. 多層防御の重要性
+- 複数のセキュリティレイヤーを実装
+- 一つの防御が破られても他が機能する
+
+### セキュリティチェックリスト
+
+実装時に確認すべき項目:
+
+- [ ] **シェル変数**: 引用符で囲んでいるか？配列を使用しているか？
+- [ ] **エラーメッセージ**: 内部詳細を含んでいないか？
+- [ ] **例外処理**: `str(e)`を直接レスポンスに含んでいないか？
+- [ ] **ログ記録**: エラー詳細はログに記録されているか？
+- [ ] **認証情報**: プロセスリストに表示されないか？
+- [ ] **環境変数**: 安全に処理されているか？
+
+### 参考リソース
+
+- OWASP Top 10
+- CWE-78: OS Command Injection
+- CWE-209: Information Exposure Through an Error Message
+
+---
+
+
+## 29. ヘルスチェックAPIのセキュリティとDoS対策（PR #48 - 2回目のレビュー）
+
+### 29-1. Dockerソケットマウントのセキュリティリスク 🔴 Security-High
+
+**問題**: Dockerソケット(`/var/run/docker.sock`)をマウントすると、読み取り専用でも他のコンテナの機密情報にアクセス可能
+
+**リスク**:
+- 他のコンテナの設定、メタデータ、環境変数（`REDIS_PASSWORD`など）を読み取り可能
+- コンテナ内のプロセスがホスト上のすべてのDockerコンテナ情報にアクセス可能
+- API認証がない場合、外部から機密情報を取得されるリスク
+
+**対策**:
+
+1. **API認証の実装** (必須):
+```python
+# 環境変数からAPI認証トークンを取得
+API_TOKEN = os.environ.get('HEALTH_API_TOKEN', '')
+
+def _check_authentication(self):
+    """API認証をチェック"""
+    if not API_TOKEN:
+        return True  # 開発環境のみ
+    
+    auth_header = self.headers.get('Authorization', '')
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+        if token == API_TOKEN:
+            return True
+    
+    return False
+
+# エンドポイントで認証チェック
+if not self._check_authentication():
+    self.send_response(401)
+    self.send_header('Content-Type', 'application/json')
+    self.end_headers()
+    self.wfile.write(json.dumps({
+        "error": "Unauthorized",
+        "message": "Invalid or missing authentication token"
+    }).encode('utf-8'))
+    return
+```
+
+2. **ネットワークアクセス制限**:
+```yaml
+# docker-compose.yml
+health-api:
+  ports:
+    # 本番環境では外部公開しない（内部ネットワークのみ）
+    # - "8888:8888"  # コメントアウト
+  networks:
+    - mwd-network  # 内部ネットワークのみ
+```
+
+3. **セキュリティ警告の文書化**:
+```yaml
+# docker-compose.yml
+volumes:
+  # セキュリティ警告: Dockerソケットへのアクセスにより、
+  # 他のコンテナの情報（設定、メタデータ、環境変数）を読み取り可能。
+  # 本番環境では必ずHEALTH_API_TOKENを設定し、ネットワークアクセスを制限すること。
+  - /var/run/docker.sock:/var/run/docker.sock:ro
+```
+
+**ベストプラクティス**:
+- 開発環境: 認証なしで動作可能（警告を表示）
+- 本番環境: `HEALTH_API_TOKEN`を必須にする
+- ネットワーク: 内部ネットワークのみアクセス可能にする
+- 監視: APIアクセスログを記録し、不正アクセスを検知
+
+**参照**: PR #48 - Task 5.6: ヘルスチェック機能実装（Gemini 2回目レビュー - Security-High）
+
+---
+
+### 29-2. API認証とエラーメッセージの情報漏洩対策 🔴 Security-Medium
+
+**問題**: ヘルスチェックAPIに認証がなく、404エラーでパス情報が漏洩する
+
+**脆弱な実装**:
+```python
+# ❌ 悪い例: 認証なし、パス情報漏洩
+else:
+    self.send_response(404)
+    self.send_header('Content-Type', 'application/json')
+    self.end_headers()
+    self.wfile.write(json.dumps({
+        "error": "Not Found",
+        "message": f"Path {path} not found"  # パス情報漏洩
+    }).encode('utf-8'))
+```
+
+**漏洩する情報**:
+- 内部ルーティング構造
+- エンドポイントの存在確認
+- システム構成の推測
+
+**安全な実装**:
+```python
+# ✅ 良い例: 認証あり、汎用エラーメッセージ
+def _check_authentication(self):
+    """API認証をチェック"""
+    # 実装は29-1参照
+    pass
+
+def do_GET(self):
+    parsed_path = urlparse(self.path)
+    path = parsed_path.path
+    
+    if path == '/engine/v1/health':
+        # 認証必要なエンドポイント
+        if not self._check_authentication():
+            self.send_response(401)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "error": "Unauthorized",
+                "message": "Invalid or missing authentication token"
+            }).encode('utf-8'))
+            return
+        
+        self.handle_health_check()
+    elif path == '/health':
+        # 簡易ヘルスチェック（Kubernetes liveness probe用、認証不要）
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps({"status": "ok"}).encode('utf-8'))
+    else:
+        # セキュリティ: パス情報を漏洩させない
+        self.send_response(404)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps({
+            "error": "Not Found"
+            # messageフィールドにパス情報を含めない
+        }).encode('utf-8'))
+```
+
+**エンドポイント設計**:
+- `/engine/v1/health`: 詳細情報、認証必要
+- `/health`: 簡易チェック、認証不要（Kubernetes用）
+
+**参照**: PR #48（Gemini 2回目レビュー - Security-Medium）
+
+---
+
+### 29-3. シングルスレッドサーバーのDoS脆弱性対策 🔴 Security-Medium
+
+**問題**: `http.server.HTTPServer`はシングルスレッドのため、遅いヘルスチェック中に同時リクエストを処理できない
+
+**脆弱な実装**:
+```python
+# ❌ 悪い例: シングルスレッドサーバー
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+def run_server():
+    server = HTTPServer(('0.0.0.0', PORT), HealthAPIHandler)
+    server.serve_forever()
+```
+
+**DoS攻撃シナリオ**:
+1. 攻撃者が複数の同時リクエストを送信
+2. 各リクエストが10秒のタイムアウトまで待機
+3. 正規のヘルスチェック（Kubernetes probe）が応答を得られない
+4. コンテナが再起動され、サービスが停止
+
+**安全な実装**:
+```python
+# ✅ 良い例: マルチスレッドサーバー
+from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
+
+def run_server():
+    # セキュリティ: マルチスレッド対応でDoS攻撃を防止
+    server = ThreadingHTTPServer(('0.0.0.0', PORT), HealthAPIHandler)
+    logger.info(f"✅ ヘルスチェックAPIサーバーを起動しました: http://0.0.0.0:{PORT}")
+    
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        logger.info("\n🛑 サーバーを停止しています...")
+        server.shutdown()
+```
+
+**ThreadingHTTPServerの利点**:
+- 各リクエストを別スレッドで処理
+- 遅いリクエストが他のリクエストをブロックしない
+- 同時リクエストに対応可能
+- DoS攻撃のリスクを軽減
+
+**注意点**:
+- スレッド数の上限を設定する場合は`ThreadPoolExecutor`の使用を検討
+- メモリ使用量の監視が必要
+- 過度な同時接続には別の対策（レートリミット）も必要
+
+**参照**: PR #48（Gemini 2回目レビュー - Security-Medium）
+
+---
+
+### 29-4. 非rootユーザーでのコンテナ実行 🟡 Medium
+
+**問題**: コンテナをrootユーザーで実行すると、侵害時のホストシステムへの影響が大きい
+
+**脆弱な実装**:
+```dockerfile
+# ❌ 悪い例: rootユーザーで実行
+FROM python:3-alpine
+
+WORKDIR /app
+
+RUN apk add --no-cache bash docker-cli docker-compose curl jq
+
+COPY health-api-server.py /app/health-api-server.py
+RUN chmod +x /app/health-api-server.py
+
+# rootユーザーで実行（デフォルト）
+CMD ["python3", "/app/health-api-server.py"]
+```
+
+**安全な実装**:
+```dockerfile
+# ✅ 良い例: 非rootユーザーで実行
+FROM python:3-alpine
+
+WORKDIR /app
+
+RUN apk add --no-cache bash docker-cli docker-compose curl jq
+
+# セキュリティ向上のため、非rootユーザーを作成
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
+# ファイルをコピー（所有者を設定）
+COPY --chown=appuser:appgroup health-api-server.py /app/health-api-server.py
+RUN chmod +x /app/health-api-server.py
+
+# 非rootユーザーとして実行
+USER appuser
+
+EXPOSE 8888
+
+CMD ["python3", "/app/health-api-server.py"]
+```
+
+**セキュリティ効果**:
+- コンテナ内で侵害が発生しても、root権限を持たない
+- ホストシステムへのエスケープを困難にする
+- 最小権限の原則（Principle of Least Privilege）に準拠
+
+**注意点**:
+- マウントされたボリュームのパーミッションに注意
+- Dockerソケットへのアクセスには`docker`グループへの追加が必要な場合がある
+- ポート番号1024未満を使用する場合は追加設定が必要
+
+**参照**: PR #48（Gemini 2回目レビュー - Medium）
+
+---
+
+### 29-5. ヘルスチェックロジックの改善（Redis重要性） 🟡 Medium
+
+**問題**: 全体ステータス判定にRedisが含まれておらず、Redis停止時も`healthy`となる
+
+**不適切な実装**:
+```bash
+# ❌ 悪い例: Redisを全体ステータスに含めない
+overall_status="healthy"
+if [ "${health_status[nginx]}" != "healthy" ] || \
+   [ "${health_status[openappsec-agent]}" != "healthy" ]; then
+    overall_status="unhealthy"
+fi
+```
+
+**改善された実装**:
+```bash
+# ✅ 良い例: Redisを必須コンポーネントとして全体ステータスに含める
+overall_status="healthy"
+if [ "${health_status[nginx]}" != "healthy" ] || \
+   [ "${health_status[openappsec-agent]}" != "healthy" ] || \
+   [ "${health_status[redis]}" != "healthy" ] || \
+   [ "${health_status[redis_connection]}" = "failed" ]; then
+    overall_status="unhealthy"
+fi
+```
+
+**設計上の考慮**:
+- **必須コンポーネント**: Nginx, OpenAppSec Agent, Redis
+- **オプションコンポーネント**: ConfigAgent, Fluentd
+
+**コンポーネント分類の基準**:
+```bash
+# 必須コンポーネント: サービスの基本動作に不可欠
+# - Nginx: リクエスト受付
+# - OpenAppSec Agent: WAF機能
+# - Redis: セッション管理、RateLimit
+
+# オプションコンポーネント: 停止してもサービスは継続
+# - ConfigAgent: 設定更新機能
+# - Fluentd: ログ転送機能
+```
+
+**参照**: PR #48（Gemini 2回目レビュー - Medium）
+
+---
+
+### 29-6. テストのアサーション強化 🟡 Medium
+
+**問題**: 異常系テストでRedis停止時の全体ステータスとHTTPコードを明示的にチェックしていない
+
+**弱いテスト**:
+```bash
+# ❌ 悪い例: コンポーネント状態のみチェック
+redis_status=$(echo "$response" | jq -r '.components.redis')
+if [ "$redis_status" = "unhealthy" ]; then
+    echo -e "${GREEN}✅ Redis異常が正しく検知されました${NC}"
+else
+    echo -e "${RED}❌ Redis異常が検知されませんでした${NC}"
+    exit 1
+fi
+```
+
+**堅牢なテスト**:
+```bash
+# ✅ 良い例: 全体ステータス、HTTPコード、コンポーネント状態を検証
+response=$(curl -s http://localhost:8888/engine/v1/health)
+http_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8888/engine/v1/health)
+status=$(echo "$response" | jq -r '.status')
+
+echo "Redis停止時のステータス: $status"
+echo "HTTPステータスコード: $http_code"
+
+# アサーション1: 全体ステータスとHTTPコードの検証
+if [ "$status" != "unhealthy" ] || [ "$http_code" != "503" ]; then
+    echo -e "${RED}❌ Redis停止時の全体ステータスが不正です (status: $status, http: $http_code)${NC}"
+    docker-compose -f "${DOCKER_DIR}/docker-compose.yml" start redis >/dev/null
+    exit 1
+fi
+echo -e "${GREEN}✅ Redis停止時に全体ステータスがunhealthy (503) になりました${NC}"
+
+# アサーション2: Redisコンポーネントの状態検証
+redis_status=$(echo "$response" | jq -r '.components.redis')
+if [ "$redis_status" = "unhealthy" ]; then
+    echo -e "${GREEN}✅ Redis異常が正しく検知されました${NC}"
+else
+    echo -e "${RED}❌ Redis異常が検知されませんでした${NC}"
+    docker-compose -f "${DOCKER_DIR}/docker-compose.yml" start redis >/dev/null
+    exit 1
+fi
+```
+
+**アサーションのメリット**:
+- ヘルスチェックロジック変更時のデグレード検知
+- 全体ステータスとコンポーネント状態の整合性確認
+- HTTPステータスコードの正確性検証
+- テスト失敗時に明確なエラーメッセージ
+
+**テストのベストプラクティス**:
+1. 複数の観点から検証（全体、コンポーネント、HTTPコード）
+2. 失敗時にリソースをクリーンアップ
+3. 明確なエラーメッセージ
+4. 期待値と実際の値を両方表示
+
+**参照**: PR #48（Gemini 2回目レビュー - Medium）
+
+---
+
+## Gemini 2回目レビューの総括（PR #48）
+
+### レビュー概要
+
+**評価**: "Comprehensive and well-thought-out implementation"
+
+**重要な指摘**:
+- 🔴 High: Dockerソケットマウント + 認証なし → 情報漏洩リスク
+- 🔴 Medium: API認証欠如、エラーメッセージでの情報漏洩
+- 🔴 Medium: シングルスレッドサーバー → DoS脆弱性
+- 🟡 Medium: rootユーザー実行、Redis除外、弱いテスト
+
+### 対応サマリー
+
+| # | 問題 | 優先度 | 対応 |
+|---|------|--------|------|
+| 1 | Dockerソケットマウント | 🔴 High | API認証追加、警告文書化 |
+| 2 | API認証欠如 | 🔴 Medium | Bearer Token認証実装 |
+| 3 | DoS脆弱性 | 🔴 Medium | ThreadingHTTPServer使用 |
+| 4 | rootユーザー実行 | 🟡 Medium | 非rootユーザー作成 |
+| 5 | Redis除外 | 🟡 Medium | 全体ステータスに追加 |
+| 6 | 弱いテスト | 🟡 Medium | アサーション強化 |
+
+### セキュリティチェックリスト（更新版）
+
+実装時に確認すべき項目:
+
+**認証・認可**:
+- [ ] API認証が実装されているか？
+- [ ] 本番環境では認証が必須か？
+- [ ] 認証トークンは安全に管理されているか？
+
+**情報漏洩対策**:
+- [ ] エラーメッセージに内部情報を含んでいないか？
+- [ ] Dockerソケットアクセスのリスクを文書化しているか？
+- [ ] ネットワークアクセスが制限されているか？
+
+**DoS対策**:
+- [ ] マルチスレッド/マルチプロセス対応か？
+- [ ] タイムアウトが適切に設定されているか？
+- [ ] レートリミットが必要か？
+
+**コンテナセキュリティ**:
+- [ ] 非rootユーザーで実行しているか？
+- [ ] 最小権限の原則に従っているか？
+- [ ] 不要なパッケージが含まれていないか？
+
+**テスト**:
+- [ ] 正常系のアサーションがあるか？
+- [ ] 異常系のアサーションがあるか？
+- [ ] テスト失敗時のクリーンアップがあるか？
+
+---
+
+
+## Gemini 3回目レビューの観点（PR #48）
+
+### 評価
+
+**総評**: "Comprehensive and well-thought-out implementation"
+
+**指摘事項**: 4つの改善点（セキュリティ、パフォーマンス、ドキュメント）
+
+---
+
+### 30-1. Fail-Closed原則とタイミング攻撃対策 🔴 Security-Medium
+
+**問題1**: API認証トークン未設定時でもサーバーが起動する（Fail-Open設計）
+
+**脆弱な実装**:
+```python
+# ❌ 悪い例: トークン未設定でも起動（Fail-Open）
+API_TOKEN = os.environ.get('HEALTH_API_TOKEN', '')
+if not API_TOKEN:
+    logger.warning("⚠️  HEALTH_API_TOKEN が設定されていません。本番環境では必ず設定してください。")
+
+def _check_authentication(self):
+    if not API_TOKEN:
+        return True  # 認証をスキップ
+```
+
+**問題2**: 文字列比較によるタイミング攻撃の可能性
+
+```python
+# ❌ 悪い例: 通常の文字列比較
+if token == API_TOKEN:
+    return True
+```
+
+**堅牢な実装**:
+```python
+# ✅ 良い例: Fail-Closed + タイミング攻撃対策
+import hmac
+import sys
+
+API_TOKEN = os.environ.get('HEALTH_API_TOKEN', '')
+ALLOW_UNAUTHENTICATED = os.environ.get('ALLOW_UNAUTHENTICATED', 'false').lower() == 'true'
+
+if not API_TOKEN:
+    if ALLOW_UNAUTHENTICATED:
+        logger.warning("⚠️  開発環境専用モードで起動します。")
+    else:
+        logger.error("❌ エラー: HEALTH_API_TOKEN が設定されていません。")
+        logger.error("開発環境で認証なしで起動する場合は ALLOW_UNAUTHENTICATED=true を設定してください。")
+        sys.exit(1)
+
+def _check_authentication(self):
+    if not API_TOKEN:
+        return True  # ALLOW_UNAUTHENTICATED=true の場合のみここに到達
+    
+    auth_header = self.headers.get('Authorization', '')
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+        # タイミング攻撃対策: hmac.compare_digest() を使用
+        if hmac.compare_digest(token, API_TOKEN):
+            return True
+    
+    return False
+```
+
+**Fail-Closed原則**:
+- デフォルトで**拒否**（認証必須）
+- 開発環境のみ明示的に許可（`ALLOW_UNAUTHENTICATED=true`）
+- 本番環境での誤設定を防止
+
+**タイミング攻撃対策**:
+- `==` 演算子: 文字列比較で処理時間が変化 → トークン推測可能
+- `hmac.compare_digest()`: 一定時間で比較 → 推測不可能
+
+**Docker Compose設定**:
+```yaml
+environment:
+  - HEALTH_API_TOKEN=${HEALTH_API_TOKEN:-}  # 本番環境では必須
+  - ALLOW_UNAUTHENTICATED=${ALLOW_UNAUTHENTICATED:-false}  # デフォルトfalse
+```
+
+**参照**: PR #48（Gemini 3回目レビュー - Security-Medium）
+
+---
+
+### 30-2. 本番環境でのポート公開削除 🔴 Security-Medium
+
+**問題**: Dockerソケットマウント + ポート公開により、外部から機密情報にアクセス可能
+
+**セキュリティリスク**:
+```yaml
+# ❌ リスク: 外部に公開 + Dockerソケットアクセス
+services:
+  health-api:
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "8888:8888"  # 外部アクセス可能
+```
+
+**攻撃シナリオ**:
+1. 外部から`http://<host>:8888/engine/v1/health`にアクセス（認証なしの場合）
+2. Dockerソケット経由で他のコンテナ情報を取得
+3. 環境変数、設定ファイル、メタデータを読み取り
+4. データベースパスワード、APIキー等が漏洩
+
+**安全な設定**:
+```yaml
+# ✅ 良い例: 本番環境ではポート公開しない
+services:
+  health-api:
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - HEALTH_API_TOKEN=${HEALTH_API_TOKEN}  # 必須
+      - ALLOW_UNAUTHENTICATED=false  # 認証必須
+    # 本番環境ではポート公開を削除
+    # ports:
+    #   - "8888:8888"
+    networks:
+      - mwd-network
+```
+
+**アクセス方法**:
+```bash
+# 内部ネットワークからのみアクセス
+docker-compose exec nginx curl http://health-api:8888/engine/v1/health
+
+# または、他のコンテナから
+docker-compose exec some-service curl \
+  -H "Authorization: Bearer ${HEALTH_API_TOKEN}" \
+  http://health-api:8888/engine/v1/health
+```
+
+**多層防御戦略**:
+1. **API認証**: Bearer Token必須
+2. **ネットワーク分離**: 内部ネットワークのみ
+3. **ポート非公開**: `ports`を削除
+4. **ファイアウォール**: さらに外部アクセスを制限
+5. **監視**: アクセスログを記録
+
+**開発環境での設定**:
+```yaml
+# 開発環境: docker-compose.override.yml で公開
+services:
+  health-api:
+    ports:
+      - "8888:8888"
+    environment:
+      - ALLOW_UNAUTHENTICATED=true  # 開発のみ
+```
+
+**参照**: PR #48（Gemini 3回目レビュー - Security-Medium）
+
+---
+
+### 30-3. curlの効率的な使用 🟢 Performance
+
+**問題**: レスポンスボディとHTTPステータスコードを取得するために2回curlを実行
+
+**非効率な実装**:
+```bash
+# ❌ 悪い例: 2回curlを実行（約2倍の時間）
+response=$(curl -s http://localhost:8888/health)
+http_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8888/health)
+
+status=$(echo "$response" | jq -r '.status')
+```
+
+**効率的な実装**:
+```bash
+# ✅ 良い例: 1回のcurlで両方取得
+response=$(curl -s -w "\n%{http_code}" http://localhost:8888/health)
+http_code=$(echo "$response" | tail -n1)
+body=$(echo "$response" | sed '$d')
+
+status=$(echo "$body" | jq -r '.status')
+```
+
+**仕組み**:
+1. `-w "\n%{http_code}"`: レスポンスボディの後に改行 + HTTPコードを追加
+2. `tail -n1`: 最終行（HTTPコード）を抽出
+3. `sed '$d'`: 最終行を削除してボディのみ取得
+
+**パフォーマンス向上**:
+- **実行時間**: 約50%削減（ネットワーク往復1回分削減）
+- **リソース使用**: プロセス起動回数半減
+- **テスト速度**: テストスクリプト全体で数秒短縮
+
+**注意点**:
+```bash
+# レスポンスボディに改行が含まれる場合でも正常に動作
+# 例: JSON形式のレスポンス
+{
+  "status": "healthy",
+  "components": {...}
+}
+200
+
+# body: JSON部分のみ
+# http_code: 200
+```
+
+**応用例**:
+```bash
+# ヘッダーも取得する場合
+response=$(curl -s -i -w "\n%{http_code}" http://localhost:8888/health)
+http_code=$(echo "$response" | tail -n1)
+headers_and_body=$(echo "$response" | sed '$d')
+```
+
+**参照**: PR #48（Gemini 3回目レビュー - Performance）
+
+---
+
+### 30-4. 本番環境設定ガイダンスの文書化 📚 Documentation
+
+**問題**: ポート公開を削除する方法や本番環境での推奨設定が不明確
+
+**改善点**: docker-compose.ymlにインラインドキュメントを追加
+
+**文書化のベストプラクティス**:
+```yaml
+services:
+  health-api:
+    # ヘルスチェックAPIサーバー
+    build:
+      context: ./health-api
+      dockerfile: Dockerfile
+    container_name: mwd-health-api
+    volumes:
+      # Dockerソケット（コンテナ状態確認用）
+      # セキュリティ警告: Dockerソケットへのアクセスにより、
+      # 他のコンテナの情報（設定、メタデータ、環境変数）を読み取り可能。
+      # 本番環境では以下の対策を必ず実施すること:
+      # 1. HEALTH_API_TOKENを設定（必須）
+      # 2. ALLOW_UNAUTHENTICATED=false を設定（デフォルト）
+      # 3. ポート公開を削除し、内部ネットワーク経由でのみアクセス許可
+      # 4. ネットワークアクセス制限（ファイアウォール・セキュリティグループ）
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - HEALTH_API_TOKEN=${HEALTH_API_TOKEN:-}  # 本番環境では必須
+      # Fail-Closed原則: トークン未設定時は起動しない（デフォルト）
+      # 開発環境で認証なしで起動する場合のみ ALLOW_UNAUTHENTICATED=true を設定
+      - ALLOW_UNAUTHENTICATED=${ALLOW_UNAUTHENTICATED:-false}
+    # セキュリティ: 本番環境ではポート公開を削除し、内部ネットワークのみでアクセス
+    # 開発環境のみポートを公開する場合は以下をコメントアウト解除
+    ports:
+      - "8888:8888"
+```
+
+**文書化の階層**:
+1. **インラインコメント**: docker-compose.yml内に具体的な設定方法
+2. **READMEファイル**: 使用方法とベストプラクティス
+3. **実装計画**: 設計判断と背景
+4. **セキュリティガイド**: 脅威モデルと対策
+
+**環境別設定の管理**:
+```bash
+# 開発環境: docker-compose.override.yml
+services:
+  health-api:
+    ports:
+      - "8888:8888"
+    environment:
+      - ALLOW_UNAUTHENTICATED=true
+
+# 本番環境: docker-compose.prod.yml
+services:
+  health-api:
+    # portsは定義しない（内部ネットワークのみ）
+    environment:
+      - HEALTH_API_TOKEN=${HEALTH_API_TOKEN}
+      - ALLOW_UNAUTHENTICATED=false
+```
+
+**チェックリスト形式の文書化**:
+```markdown
+## 本番環境デプロイ前チェックリスト
+
+### セキュリティ
+- [ ] `HEALTH_API_TOKEN`を安全な値に設定
+- [ ] `ALLOW_UNAUTHENTICATED=false`を確認
+- [ ] `ports: 8888:8888`をコメントアウト
+- [ ] ファイアウォールルールを設定
+
+### 動作確認
+- [ ] 内部ネットワークからアクセス可能
+- [ ] 外部からアクセス不可能を確認
+- [ ] 認証なしアクセスが拒否されることを確認
+```
+
+**参照**: PR #48（Gemini 3回目レビュー - Documentation）
+
+---
+
+## Gemini 3回目レビューの総括（PR #48）
+
+### レビュー概要
+
+**評価**: 引き続き"Comprehensive and well-thought-out implementation"だが、細かいセキュリティ・パフォーマンス改善点あり
+
+### 対応サマリー
+
+| # | 問題 | 分類 | 対応 |
+|---|------|------|------|
+| 1 | Fail-Open設計 | 🔴 Security | Fail-Closed原則、hmac.compare_digest使用 |
+| 2 | ポート公開 | 🔴 Security | 本番環境での削除を文書化 |
+| 3 | curl非効率 | 🟢 Performance | 1回のcurlで両方取得 |
+| 4 | 文書化不足 | 📚 Documentation | インラインコメント追加 |
+
+### セキュリティ設計の進化
+
+**1回目レビュー後**: 基本的なセキュリティ（コマンドインジェクション、情報漏洩対策）
+
+**2回目レビュー後**: 多層防御（認証、DoS対策、非rootユーザー）
+
+**3回目レビュー後**: Fail-Closed原則、タイミング攻撃対策、ネットワーク分離
+
+### 継続的改善の重要性
+
+Geminiの3回のレビューを通じて：
+1. **基本的な脆弱性**: コマンドインジェクション、情報漏洩
+2. **設計レベルの問題**: 認証欠如、DoS脆弱性
+3. **細部の最適化**: Fail-Closed原則、タイミング攻撃、パフォーマンス
+
+各レビューサイクルで段階的に品質とセキュリティが向上。
+
+### 最終セキュリティチェックリスト
+
+実装完了前の確認項目:
+
+**認証・認可（Fail-Closed原則）**:
+- [ ] API認証トークンが未設定の場合、サーバーが起動しないか？
+- [ ] `ALLOW_UNAUTHENTICATED`が明示的に`true`の場合のみ起動するか？
+- [ ] `hmac.compare_digest()`でタイミング攻撃対策しているか？
+
+**ネットワーク分離**:
+- [ ] 本番環境で外部ポート公開を削除したか？
+- [ ] 内部ネットワークのみでアクセス可能か？
+- [ ] ファイアウォールルールを設定したか？
+
+**情報漏洩対策**:
+- [ ] エラーメッセージに内部情報を含んでいないか？
+- [ ] Dockerソケットアクセスのリスクを文書化したか？
+
+**DoS対策**:
+- [ ] マルチスレッド対応（ThreadingHTTPServer）か？
+- [ ] タイムアウトが適切に設定されているか？
+
+**コンテナセキュリティ**:
+- [ ] 非rootユーザーで実行しているか？
+- [ ] 不要なパッケージが含まれていないか？
+
+**パフォーマンス**:
+- [ ] curl呼び出しが最適化されているか？
+- [ ] 不要なネットワーク往復を削減したか？
+
+**ドキュメント**:
+- [ ] 本番環境設定が文書化されているか？
+- [ ] セキュリティリスクが明記されているか？
+- [ ] チェックリストが提供されているか？
+
+---
+
+
+## Gemini 4回目レビューの観点（PR #48）
+
+### 評価
+
+**総評**: "Comprehensive and well-thought-out implementation"
+
+**重大な指摘**: Dockerソケットマウントに関する根本的なセキュリティ懸念
+
+---
+
+### 31-1. Dockerソケットマウントの根本的な問題 🔴 Security-High（最優先）
+
+**問題**: read-onlyでもDockerソケットマウントは重大なセキュリティリスク
+
+**セキュリティリスク**（複数の指摘を統合）:
+1. **情報漏洩**: 他のコンテナの環境変数、設定、メタデータを読み取り可能
+2. **権限昇格**: Docker APIを通じて他のコンテナを操作可能
+3. **ホスト侵害**: compromisedコンテナからホスト全体への影響拡大
+
+**現在の実装**:
+```yaml
+# ❌ 高リスク: Dockerソケットへの直接アクセス
+services:
+  health-api:
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+```
+
+**Geminiの推奨**: ネットワークベースのヘルスチェックへの移行
+
+```bash
+# ✅ 推奨: ネットワーク経由でヘルスチェック
+check_nginx() {
+    # docker-compose ps の代わりに、サービスに直接接続
+    if curl -sf http://nginx:80 >/dev/null 2>&1; then
+        health_status["nginx"]="healthy"
+    else
+        health_status["nginx"]="unhealthy"
+    fi
+}
+
+check_redis() {
+    # docker-compose exec の代わりに、redis-cliで直接接続
+    if redis-cli -h redis -p 6379 ${redis_auth_args[@]} ping >/dev/null 2>&1; then
+        health_status["redis"]="healthy"
+    else
+        health_status["redis"]="unhealthy"
+    fi
+}
+```
+
+**移行戦略**:
+1. **短期**: 現在の実装を維持（セキュリティ警告を明記）
+2. **中期**: ネットワークベースのヘルスチェックを並行実装
+3. **長期**: Dockerソケット依存を完全に削除
+
+**リスク軽減策（現在実装中）**:
+- API認証（Bearer Token）必須
+- Fail-Closed原則（デフォルトで起動しない）
+- ポート公開をデフォルトで無効化
+- 非rootユーザーで実行
+- 詳細なセキュリティ警告文書化
+
+**参照**: PR #48（Gemini 4回目レビュー - Security-High × 4件）
+
+---
+
+### 31-2. ポート公開のデフォルト設定変更 🔴 Security-High
+
+**問題**: 開発環境向けの設定が本番環境でのデフォルトになっている
+
+**セキュリティリスク**:
+- Dockerソケットアクセス + 外部ポート公開 = 情報漏洩リスク最大化
+- 本番環境での誤設定による事故を防止できない
+
+**脆弱な設定**:
+```yaml
+# ❌ 悪い例: デフォルトでポート公開
+services:
+  health-api:
+    ports:
+      - "8888:8888"  # 外部からアクセス可能
+```
+
+**堅牢な設定**:
+```yaml
+# ✅ 良い例: デフォルトでポート非公開
+services:
+  health-api:
+    # セキュリティ: 本番環境ではポート公開をデフォルトで無効化
+    # 内部ネットワーク経由でのみアクセス可能（他のコンテナから health-api:8888 でアクセス）
+    # 開発環境でホストからアクセスする場合は docker-compose.override.yml でポートを公開
+    # ports:
+    #   - "8888:8888"
+```
+
+**開発環境用の設定**: `docker-compose.override.yml`
+
+```yaml
+# docker-compose.override.yml（開発環境専用）
+services:
+  health-api:
+    ports:
+      - "8888:8888"
+    environment:
+      - ALLOW_UNAUTHENTICATED=true
+```
+
+**効果**:
+- ✅ **本番環境**: デフォルトで安全（ポート非公開）
+- ✅ **開発環境**: オーバーライドファイルで柔軟に設定
+- ✅ **誤設定防止**: 明示的な設定が必要
+
+**本番環境でのアクセス方法**:
+```bash
+# 内部ネットワーク経由
+docker-compose exec nginx curl -H "Authorization: Bearer ${TOKEN}" \
+  http://health-api:8888/engine/v1/health
+```
+
+**参照**: PR #48（Gemini 4回目レビュー - Security-High/Medium × 4件）
+
+---
+
+### 31-3. 非rootユーザーとDockerソケットアクセス 🔴 Critical
+
+**問題**: 非rootユーザー（`appuser`）がDockerソケットにアクセスできない
+
+**エラー例**:
+```
+Permission denied while trying to connect to the Docker daemon socket
+```
+
+**原因**: `appuser`が`docker`グループに所属していない
+
+**解決策**:
+```dockerfile
+# ✅ 良い例: dockerグループを作成してappuserを追加
+RUN addgroup -S appgroup && \
+    adduser -S appuser -G appgroup && \
+    addgroup docker && \
+    addgroup appuser docker
+```
+
+**注意点**:
+- ホストの`docker.sock`のGIDとコンテナ内の`docker`グループのGIDを一致させる必要がある
+- 一部の環境では`-g 999`などでGIDを明示的に指定する必要がある
+- GIDが既に使用されている場合は、システムで自動割り当てされる
+
+**セキュリティトレードオフ**:
+- **メリット**: 非rootユーザーで実行（最小権限の原則）
+- **デメリット**: dockerグループに所属 = Dockerソケットへのアクセス権限
+- **結論**: Dockerソケットマウントが必要な限り、このトレードオフは避けられない
+
+**長期的な解決策**: ネットワークベースのヘルスチェックへの移行（Dockerソケット不要）
+
+**参照**: PR #48（Gemini 4回目レビュー - Critical）
+
+---
+
+### 31-4. `grep -P`の非互換性 🔴 High
+
+**問題**: `grep -P`（Perl正規表現）はBusyBoxの`grep`でサポートされていない
+
+**エラー例**:
+```bash
+nginx_version=$(docker-compose exec -T nginx nginx -v 2>&1 | grep -oP 'nginx/\K[0-9.]+' || echo "unknown")
+# BusyBox環境では常に "unknown" になる
+```
+
+**原因**: `python:3-alpine`のBusyBoxは`grep -P`をサポートしていない
+
+**移植性のある解決策**:
+```bash
+# ✅ 良い例: BusyBox互換のコマンドを使用
+nginx_version=$(docker-compose exec -T nginx nginx -v 2>&1 | grep -o 'nginx/[0-9.]*' | cut -d'/' -f2 || echo "unknown")
+```
+
+**仕組み**:
+1. `grep -o 'nginx/[0-9.]*'`: `nginx/1.24.0`を抽出
+2. `cut -d'/' -f2`: `/`で分割して2番目のフィールド（`1.24.0`）を取得
+
+**教訓**:
+- Alpine/BusyBox環境では、GNU拡張機能を避ける
+- POSIX互換のコマンドを優先
+- `sed`, `cut`, `awk`などの標準ツールを活用
+
+**参照**: PR #48（Gemini 4回目レビュー - High）
+
+---
+
+### 31-5. `overall_status`ロジックの不整合 🔴 High
+
+**問題**: JSON出力とテキスト出力で`overall_status`の判定ロジックが異なる
+
+**不整合の例**:
+- **JSON出力**: Redisをチェック → `unhealthy`
+- **テキスト出力**: Redisをチェックしない → `healthy`
+
+**脆弱な実装**:
+```bash
+# ❌ 悪い例: ロジックが重複し、不整合が発生
+if [ "$output_json" = true ]; then
+    overall_status="healthy"
+    if [ "${health_status[nginx]}" != "healthy" ] || \
+       [ "${health_status[openappsec-agent]}" != "healthy" ] || \
+       [ "${health_status[redis]}" != "healthy" ]; then
+        overall_status="unhealthy"
+    fi
+    # JSON出力
+else
+    # テキスト出力
+    if [ "${health_status[nginx]}" = "healthy" ] && \
+       [ "${health_status[openappsec-agent]}" = "healthy" ]; then
+        echo "✅ 正常"
+    fi
+fi
+```
+
+**堅牢な実装**:
+```bash
+# ✅ 良い例: ロジックを一元化
+# 全体ステータスの判定（両方の出力モードで共通）
+overall_status="healthy"
+if [ "${health_status[nginx]}" != "healthy" ] || \
+   [ "${health_status[openappsec-agent]}" != "healthy" ] || \
+   [ "${health_status[redis]}" != "healthy" ] || \
+   [ "${health_status[redis_connection]}" = "failed" ]; then
+    overall_status="unhealthy"
+fi
+
+# 出力（両方のモードで$overall_statusを使用）
+if [ "$output_json" = true ]; then
+    # JSON出力で$overall_statusを使用
+else
+    # テキスト出力でも$overall_statusを使用
+    if [ "$overall_status" = "healthy" ]; then
+        echo "✅ 正常"
+        exit 0
+    else
+        echo "❌ 異常"
+        exit 1
+    fi
+fi
+```
+
+**メリット**:
+- ✅ ロジックの一貫性が保証される
+- ✅ メンテナンス性向上（修正箇所が1箇所）
+- ✅ テストが容易（両方の出力モードで同じ結果）
+
+**参照**: PR #48（Gemini 4回目レビュー - High）
+
+---
+
+### 31-6. テストスクリプトの保守性向上 🟡 Medium
+
+**問題1**: ポート番号が`8888`としてハードコードされている
+
+**改善策**:
+```bash
+# ✅ 良い例: 環境変数からポート番号を取得
+HEALTH_API_PORT=${HEALTH_API_PORT:-8888}
+API_BASE_URL="http://localhost:${HEALTH_API_PORT}"
+
+# すべてのcurlで使用
+response=$(curl -s -w "\n%{http_code}" ${API_BASE_URL}/health)
+```
+
+**メリット**:
+- docker-compose.ymlのポート変更に追随
+- CI/CD環境での柔軟性
+- 複数環境でのテストが容易
+
+**問題2**: 異常系テストのアサーション不足
+
+**脆弱なテスト**:
+```bash
+# ❌ 悪い例: コンポーネント状態のみチェック
+redis_status=$(echo "$response" | jq -r '.components.redis')
+if [ "$redis_status" = "unhealthy" ]; then
+    echo "✅ Redis異常検知"
+fi
+```
+
+**堅牢なテスト**:
+```bash
+# ✅ 良い例: 全体ステータス + HTTPコード + コンポーネント状態をチェック
+if [ "$status" != "unhealthy" ] || [ "$http_code" != "503" ]; then
+    echo "❌ 全体ステータスが不正 (status: $status, http: $http_code)"
+    exit 1
+fi
+echo "✅ Redis停止時に全体ステータスがunhealthy (503)"
+
+redis_status=$(echo "$body" | jq -r '.components.redis')
+if [ "$redis_status" = "unhealthy" ]; then
+    echo "✅ Redis異常検知"
+fi
+```
+
+**アサーションのベストプラクティス**:
+1. **複数の観点から検証**: 全体、コンポーネント、HTTPコード
+2. **期待値を明示**: エラーメッセージに期待値と実際の値を表示
+3. **クリーンアップ**: テスト失敗時にリソースを元に戻す
+
+**参照**: PR #48（Gemini 4回目レビュー - Medium × 2件）
+
+---
+
+## Gemini 4回目レビューの総括（PR #48）
+
+### レビュー概要
+
+**評価**: "Comprehensive and well-thought-out implementation"だが、**重大なセキュリティ懸念**あり
+
+**重要な指摘の分類**:
+- 🔴 **Security-High** × 4: Dockerソケットマウント + ポート公開
+- 🔴 **Critical** × 1: 非rootユーザーとDockerソケットアクセス
+- 🔴 **High** × 2: `grep -P`非互換性、`overall_status`ロジック不整合
+- 🟡 **Medium** × 2: テストスクリプトの保守性
+
+### 対応サマリー
+
+| # | 問題 | 優先度 | 対応状況 |
+|---|------|--------|----------|
+| 1 | Dockerソケットマウント | 🔴 Security-High | ⚠️ 短期: 文書化、長期: 移行検討 |
+| 2 | ポート公開デフォルト | 🔴 Security-High | ✅ デフォルト無効化 + override.yml |
+| 3 | 非rootユーザーアクセス | 🔴 Critical | ✅ dockerグループ追加 |
+| 4 | `grep -P`非互換性 | 🔴 High | ✅ BusyBox互換コマンドに修正 |
+| 5 | `overall_status`不整合 | 🔴 High | ✅ ロジック一元化 |
+| 6 | テストスクリプト保守性 | 🟡 Medium | ✅ 環境変数対応、アサーション強化 |
+
+### 長期的な改善計画
+
+**Phase 1（完了）**: 既存実装のセキュリティ強化
+- ✅ API認証（Fail-Closed原則）
+- ✅ ポート公開デフォルト無効化
+- ✅ 非rootユーザー実行
+- ✅ 詳細な文書化
+
+**Phase 2（検討中）**: ネットワークベースのヘルスチェック
+- ⏭️ docker-compose ps → ネットワーク接続チェック
+- ⏭️ docker-compose exec → 直接サービス接続
+- ⏭️ Dockerソケット依存の完全削除
+
+**Phase 3（将来）**: Kubernetes nativeヘルスチェック
+- ⏭️ Liveness/Readiness Probesの実装
+- ⏭️ Service Meshとの統合
+
+### セキュリティ設計の進化（4回のレビュー）
+
+**1回目レビュー**: 基本的なセキュリティ
+- コマンドインジェクション対策
+- 情報漏洩対策
+
+**2回目レビュー**: 多層防御
+- API認証（Bearer Token）
+- DoS対策（ThreadingHTTPServer）
+- 非rootユーザー実行
+
+**3回目レビュー**: 細部の最適化
+- Fail-Closed原則
+- タイミング攻撃対策（hmac.compare_digest）
+- パフォーマンス最適化
+
+**4回目レビュー（今回）**: 根本的な設計レビュー
+- **Dockerソケット依存の問題認識**
+- **デフォルト設定の見直し**
+- **長期的な改善計画の必要性**
+
+### 最終判断
+
+**現在の実装**:
+- ✅ 短期的には許容可能（多層防御により緩和）
+- ⚠️ 長期的にはネットワークベースへの移行が必要
+- 📚 詳細な文書化により、リスクを明示
+
+**レビュアーの見解**:
+> "While the implementation shows deep consideration for security, the fundamental reliance on the Docker socket mount remains a significant concern. Transition to network-based health checks is strongly recommended."
+
+---
+

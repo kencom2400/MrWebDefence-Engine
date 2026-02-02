@@ -1,0 +1,14 @@
+# docker-compose.override.yml
+# 開発環境用のオーバーライド設定
+# このファイルは docker-compose.yml と自動的にマージされます
+#
+# 本番環境では使用しないでください
+
+services:
+  health-api:
+    # 開発環境: ヘルスチェックAPIをホストに公開
+    ports:
+      - "8888:8888"
+    environment:
+      # 開発環境: 認証なしで起動（テスト・デバッグ用）
+      - ALLOW_UNAUTHENTICATED=true
