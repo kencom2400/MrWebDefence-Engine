@@ -113,7 +113,7 @@ docker-compose -f "$DOCKER_DIR/docker-compose.yml" exec -T openappsec-agent \
     echo "Exceptions設定が見つかりません"
 
 echo ""
-echo -e "${GREEN}5. ポリシーファイルの生の内容（YAML）${NC}"
+echo -e "${GREEN}7. ポリシーファイルの生の内容（YAML）${NC}"
 echo "----------------------------------------"
 docker-compose -f "$DOCKER_DIR/docker-compose.yml" exec -T openappsec-agent \
     cat /ext/appsec/local_policy.yaml 2>/dev/null | head -100 || echo "ポリシーファイルを読み込めませんでした"

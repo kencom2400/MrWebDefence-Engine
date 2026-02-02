@@ -40,9 +40,29 @@ OpenAppSec GitHub [Issue #397](https://github.com/openappsec/openappsec/issues/3
 
 ## 関連
 
+- **Jira**: [MWD-110](https://kencom2400.atlassian.net/browse/MWD-110)（本チケット）
 - **OpenAppSec Issue**: https://github.com/openappsec/openappsec/issues/397
 - **現状の固定バージョン**: 1.1.32-open-source（`docker/docker-compose.yml`）
-- **タスク**: MWD-41（RateLimit 機能）
+- **Epic**: MWD-41（RateLimit 機能）
+
+## Jira チケット
+
+- **作成済み**: [MWD-110](https://kencom2400.atlassian.net/browse/MWD-110)（OpenAppSec バージョンアップ（Issue #397 解消後））
+
+同内容で Jira にタスクを再作成する場合のコマンド例（**前提**: `scripts/jira/config.local.sh` に `JIRA_EMAIL` と `JIRA_API_TOKEN` を設定済みであること）:
+
+```bash
+./scripts/jira/issues/create-issue.sh \
+  --title "OpenAppSec バージョンアップ（Issue #397 解消後）" \
+  --body-file docs/issues/OPENAPPSEC-UPGRADE-AFTER-397-jira-body.txt \
+  --issue-type タスク \
+  --status Backlog \
+  --project-key MWD \
+  --parent MWD-41
+```
+
+- **Epic MWD-41** に紐づくタスクとして作成される（`--parent MWD-41`）。プロジェクトの Issue 種別が日本語の場合は `--issue-type タスク` を指定する。
+- 本文は `docs/issues/OPENAPPSEC-UPGRADE-AFTER-397-jira-body.txt` を参照。
 
 ## 備考
 
