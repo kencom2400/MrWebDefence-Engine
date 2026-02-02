@@ -57,9 +57,10 @@ services:
 
   openappsec-agent:
     # OpenAppSec公式のAgentイメージ
-    # 注意: 特定バージョンを指定することを推奨（再現性のため）
-    # 現在は動作確認のため:latestを使用
-    image: ghcr.io/openappsec/agent:latest
+    # デフォルト: latest（CI・ローカルテストで利用。1.1.32-open-source は GHCR に存在しないため）
+    # Issue #397 解消後に特定タグで固定する場合は OPENAPPSEC_AGENT_IMAGE で指定
+    # https://github.com/openappsec/openappsec/issues/397
+    image: ${OPENAPPSEC_AGENT_IMAGE:-ghcr.io/openappsec/agent:latest}
     platform: linux/amd64
     container_name: mwd-openappsec-agent
     volumes:
@@ -77,7 +78,7 @@ services:
       # デフォルト: true（ローカル管理）
       # SaaS管理UIを使用する場合は docker-compose.saas.yml で false に設定
       - autoPolicyLoad=${APPSEC_AUTO_POLICY_LOAD:-true}
-      # ログレベル
+      # ログレベル（安定運用のためinfo）
       - OPENAPPSEC_LOG_LEVEL=${OPENAPPSEC_LOG_LEVEL:-info}
       # SaaS管理を使用する場合は docker-compose.saas.yml を参照
       # - AGENT_TOKEN=${APPSEC_AGENT_TOKEN}

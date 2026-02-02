@@ -5,6 +5,66 @@
 
 set -e
 
+# バックエンドホストのバリデーション（設定インジェクション・SSRF対策）
+# 許可: ドメイン名（英数字・ハイフン・ドット）、localhost、IPv4
+# 拒否: 空白・改行・;|$`<>() 等のシェル/設定に危険な文字
+validate_backend_host() {
+    local host="$1"
+    local fqdn_label="$2"
+    if [ -z "$host" ]; then
+        echo "httpbin.org"
+        return
+    fi
+    # 長さ制限（ホスト名は253文字まで）
+    if [ "${#host}" -gt 253 ]; then
+        echo "⚠️  警告: FQDN '$fqdn_label' のbackend_hostが長すぎます。デフォルト値を使用します" >&2
+        echo "httpbin.org"
+        return
+    fi
+    # 許可パターン: 各ラベルが英数字で始まり英数字またはハイフンのみ、英数字で終わる（a..b, a-.com 等を拒否）、localhost、IPv4
+    if echo "$host" | grep -qE '^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$|^localhost$|^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'; then
+        # IPv4の各オクテットが0-255であることを確認
+        if echo "$host" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'; then
+            local o1 o2 o3 o4
+            IFS='.' read -r o1 o2 o3 o4 << EOF
+$host
+EOF
+            if [ "$o1" -gt 255 ] 2>/dev/null || [ "$o2" -gt 255 ] 2>/dev/null || [ "$o3" -gt 255 ] 2>/dev/null || [ "$o4" -gt 255 ] 2>/dev/null; then
+                echo "⚠️  警告: FQDN '$fqdn_label' のbackend_hostが無効なIPv4です。デフォルト値を使用します" >&2
+                echo "httpbin.org"
+                return
+            fi
+        fi
+        echo "$host"
+    else
+        echo "⚠️  警告: FQDN '$fqdn_label' のbackend_hostに無効な文字が含まれています。デフォルト値を使用します" >&2
+        echo "httpbin.org"
+    fi
+}
+
+# バックエンドポートのバリデーション（1-65535の整数のみ許可）
+validate_backend_port() {
+    local port="$1"
+    local fqdn_label="$2"
+    if [ -z "$port" ] || [ "$port" = "null" ]; then
+        echo "80"
+        return
+    fi
+    if echo "$port" | grep -qE '^[0-9]+$'; then
+        local p
+        p=$((port + 0))
+        if [ "$p" -ge 1 ] 2>/dev/null && [ "$p" -le 65535 ]; then
+            echo "$p"
+        else
+            echo "⚠️  警告: FQDN '$fqdn_label' のbackend_portが範囲外です（1-65535）。デフォルト値を使用します" >&2
+            echo "80"
+        fi
+    else
+        echo "⚠️  警告: FQDN '$fqdn_label' のbackend_portが数値ではありません。デフォルト値を使用します" >&2
+        echo "80"
+    fi
+}
+
 # Nginx設定ファイルを生成
 generate_nginx_configs() {
     local config_data="$1"
@@ -77,20 +137,22 @@ generate_nginx_configs() {
         trap - RETURN
         rm -f "$jq_error"
         
-        # バックエンド設定を取得
+        # バックエンド設定を取得（API値はバリデーション・サニタイズを適用）
+        local backend_host_raw
+        backend_host_raw=$(echo "$fqdn_config" | jq -r '.backend_host // "httpbin.org"')
+        if [ $? -ne 0 ] || [ -z "$backend_host_raw" ] || [ "$backend_host_raw" = "null" ]; then
+            backend_host_raw="httpbin.org"
+        fi
         local backend_host
-        backend_host=$(echo "$fqdn_config" | jq -r '.backend_host // "httpbin.org"')
-        if [ $? -ne 0 ] || [ -z "$backend_host" ]; then
-            echo "⚠️  警告: FQDN '$fqdn' のbackend_hostが取得できません。デフォルト値を使用します" >&2
-            backend_host="httpbin.org"
+        backend_host=$(validate_backend_host "$backend_host_raw" "$fqdn")
+
+        local backend_port_raw
+        backend_port_raw=$(echo "$fqdn_config" | jq -r '.backend_port // 80')
+        if [ $? -ne 0 ] || [ -z "$backend_port_raw" ] || [ "$backend_port_raw" = "null" ]; then
+            backend_port_raw="80"
         fi
-        
         local backend_port
-        backend_port=$(echo "$fqdn_config" | jq -r '.backend_port // 80')
-        if [ $? -ne 0 ] || [ -z "$backend_port" ]; then
-            echo "⚠️  警告: FQDN '$fqdn' のbackend_portが取得できません。デフォルト値を使用します" >&2
-            backend_port="80"
-        fi
+        backend_port=$(validate_backend_port "$backend_port_raw" "$fqdn")
         
         local backend_path
         backend_path=$(echo "$fqdn_config" | jq -r '.backend_path // ""')
@@ -110,12 +172,10 @@ generate_nginx_configs() {
         fi
         
         # バックエンドURLを構築
+        # 注意: RateLimit機能をテストするため、パスを保持する必要がある
+        # proxy_passの末尾にパスを含めないことで、リクエストパスが保持される
         local backend_url
-        if [ -n "$backend_path" ]; then
-            backend_url="http://${backend_host}:${backend_port}${backend_path}"
-        else
-            backend_url="http://${backend_host}:${backend_port}"
-        fi
+        backend_url="http://${backend_host}:${backend_port}"
         
         local config_file="${output_dir}/${fqdn}.conf"
         
