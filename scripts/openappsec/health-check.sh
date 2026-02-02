@@ -192,6 +192,13 @@ if [ "$output_json" = true ]; then
         system_info: $system_info,
         errors: $errors
       }'
+    
+    # JSON出力モードでもexit codeを適切に設定
+    if [ "$overall_status" = "healthy" ]; then
+        exit 0
+    else
+        exit 1
+    fi
 else
     # 人間が読みやすい形式で出力
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
