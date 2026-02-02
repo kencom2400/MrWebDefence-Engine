@@ -28,9 +28,9 @@ cleanup_on_error() {
     
     if [ $exit_code -ne 0 ]; then
         echo ""
-        echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "${RED}  ❌ インストールに失敗しました (終了コード: $exit_code)${NC}"
-        echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        printf '%b\n' "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        printf '%b\n' "${RED}  ❌ インストールに失敗しました (終了コード: $exit_code)${NC}"
+        printf '%b\n' "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo ""
         echo "エラー発生時のクリーンアップオプション:"
         echo "1. コンテナを停止して削除（docker-compose down）"
@@ -39,24 +39,28 @@ cleanup_on_error() {
         echo ""
         read -p "選択してください (1/2/3) [デフォルト: 3]: " cleanup_option
         
-        cd "$DOCKER_DIR"
-        case ${cleanup_option:-3} in
-            1)
-                echo "🔄 コンテナを停止中..."
-                docker-compose down 2>/dev/null || true
-                echo -e "${GREEN}✅ クリーンアップ完了${NC}"
-                ;;
-            2)
-                echo "📋 ログを表示します:"
-                docker-compose logs --tail=50 2>/dev/null || echo "ログの取得に失敗しました"
-                ;;
-            3)
-                echo "ℹ️  クリーンアップをスキップしました"
-                ;;
-            *)
-                echo "ℹ️  無効な選択です。何もしません"
-                ;;
-        esac
+        if [ -d "$DOCKER_DIR" ]; then
+            cd "$DOCKER_DIR"
+            case ${cleanup_option:-3} in
+                1)
+                    echo "🔄 コンテナを停止中..."
+                    docker-compose down 2>/dev/null || true
+                    printf '%b\n' "${GREEN}✅ クリーンアップ完了${NC}"
+                    ;;
+                2)
+                    echo "📋 ログを表示します:"
+                    docker-compose logs --tail=50 2>/dev/null || echo "ログの取得に失敗しました"
+                    ;;
+                3)
+                    echo "ℹ️  クリーンアップをスキップしました"
+                    ;;
+                *)
+                    echo "ℹ️  無効な選択です。何もしません"
+                    ;;
+            esac
+        else
+            echo "ℹ️  Dockerディレクトリ ($DOCKER_DIR) が見つからないため、コンテナのクリーンアップはスキップされました。"
+        fi
         echo ""
         echo "トラブルシューティング:"
         echo "  - ログを確認: cd ${DOCKER_DIR} && docker-compose logs"
@@ -73,45 +77,45 @@ trap 'cleanup_on_error' EXIT
 # ============================================
 
 check_dependencies() {
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BLUE}  📋 1. 依存関係の確認${NC}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf '%b\n' "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf '%b\n' "${BLUE}  📋 1. 依存関係の確認${NC}"
+    printf '%b\n' "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     
     # Dockerの確認
     if ! command -v docker >/dev/null 2>&1; then
-        echo -e "${RED}❌ エラー: Dockerがインストールされていません${NC}"
+        printf '%b\n' "${RED}❌ エラー: Dockerがインストールされていません${NC}"
         echo "   Dockerをインストールしてから再実行してください"
         echo "   https://docs.docker.com/get-docker/"
         exit 1
     fi
-    echo -e "${GREEN}✅ Docker: $(docker --version)${NC}"
+    printf '%b\n' "${GREEN}✅ Docker: $(docker --version)${NC}"
     
     # docker-composeの確認
     if ! command -v docker-compose >/dev/null 2>&1 && ! docker compose version >/dev/null 2>&1; then
-        echo -e "${RED}❌ エラー: docker-composeがインストールされていません${NC}"
+        printf '%b\n' "${RED}❌ エラー: docker-composeがインストールされていません${NC}"
         echo "   docker-composeをインストールしてから再実行してください"
         exit 1
     fi
     if command -v docker-compose >/dev/null 2>&1; then
-        echo -e "${GREEN}✅ docker-compose: $(docker-compose --version)${NC}"
+        printf '%b\n' "${GREEN}✅ docker-compose: $(docker-compose --version)${NC}"
     else
-        echo -e "${GREEN}✅ docker compose: $(docker compose version)${NC}"
+        printf '%b\n' "${GREEN}✅ docker compose: $(docker compose version)${NC}"
     fi
     
     # jqの確認（オプション）
     if command -v jq >/dev/null 2>&1; then
-        echo -e "${GREEN}✅ jq: $(jq --version)${NC}"
+        printf '%b\n' "${GREEN}✅ jq: $(jq --version)${NC}"
     else
-        echo -e "${YELLOW}⚠️  jqがインストールされていません（推奨）${NC}"
+        printf '%b\n' "${YELLOW}⚠️  jqがインストールされていません（推奨）${NC}"
     fi
     
     # curlの確認
     if ! command -v curl >/dev/null 2>&1; then
-        echo -e "${RED}❌ エラー: curlがインストールされていません${NC}"
+        printf '%b\n' "${RED}❌ エラー: curlがインストールされていません${NC}"
         exit 1
     fi
-    echo -e "${GREEN}✅ curl: $(curl --version | head -1)${NC}"
+    printf '%b\n' "${GREEN}✅ curl: $(curl --version | head -1)${NC}"
     echo ""
 }
 
@@ -120,9 +124,9 @@ check_dependencies() {
 # ============================================
 
 check_directory_structure() {
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BLUE}  📋 2. ディレクトリ構造の確認${NC}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf '%b\n' "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf '%b\n' "${BLUE}  📋 2. ディレクトリ構造の確認${NC}"
+    printf '%b\n' "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     
     local required_dirs=(
@@ -136,11 +140,11 @@ check_directory_structure() {
     
     for dir in "${required_dirs[@]}"; do
         if [ ! -d "$dir" ]; then
-            echo -e "${RED}❌ エラー: ディレクトリが見つかりません: $dir${NC}"
+            printf '%b\n' "${RED}❌ エラー: ディレクトリが見つかりません: $dir${NC}"
             exit 1
         fi
     done
-    echo -e "${GREEN}✅ 必要なディレクトリが存在します${NC}"
+    printf '%b\n' "${GREEN}✅ 必要なディレクトリが存在します${NC}"
     echo ""
 }
 
@@ -149,16 +153,16 @@ check_directory_structure() {
 # ============================================
 
 check_existing_containers() {
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BLUE}  📋 3. 既存コンテナの確認${NC}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf '%b\n' "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf '%b\n' "${BLUE}  📋 3. 既存コンテナの確認${NC}"
+    printf '%b\n' "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     
     cd "$DOCKER_DIR"
     local running_containers=$(docker-compose ps -q 2>/dev/null || true)
     
     if [ -n "$running_containers" ]; then
-        echo -e "${YELLOW}⚠️  既存のコンテナが実行中です:${NC}"
+        printf '%b\n' "${YELLOW}⚠️  既存のコンテナが実行中です:${NC}"
         docker-compose ps
         echo ""
         read -p "既存のコンテナを停止して再インストールしますか？ (y/N): " answer
@@ -166,13 +170,13 @@ check_existing_containers() {
         if [[ "$answer" =~ ^[Yy]$ ]]; then
             echo "🔄 既存のコンテナを停止中..."
             docker-compose down
-            echo -e "${GREEN}✅ 既存のコンテナを停止しました${NC}"
+            printf '%b\n' "${GREEN}✅ 既存のコンテナを停止しました${NC}"
         else
             echo "ℹ️  インストールを中断しました"
             exit 0
         fi
     else
-        echo -e "${GREEN}✅ 既存のコンテナはありません${NC}"
+        printf '%b\n' "${GREEN}✅ 既存のコンテナはありません${NC}"
     fi
     echo ""
 }
@@ -182,9 +186,9 @@ check_existing_containers() {
 # ============================================
 
 select_installation_mode() {
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BLUE}  📋 4. インストールモードの選択${NC}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf '%b\n' "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf '%b\n' "${BLUE}  📋 4. インストールモードの選択${NC}"
+    printf '%b\n' "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     echo "1. クイックスタート（開発環境、デフォルト設定）"
     echo "2. カスタムインストール（環境変数を設定）"
@@ -194,19 +198,19 @@ select_installation_mode() {
     
     case ${mode:-1} in
         1)
-            echo -e "${GREEN}✅ クイックスタートモードを選択しました${NC}"
+            printf '%b\n' "${GREEN}✅ クイックスタートモードを選択しました${NC}"
             INSTALL_MODE="quick"
             ;;
         2)
-            echo -e "${GREEN}✅ カスタムインストールモードを選択しました${NC}"
+            printf '%b\n' "${GREEN}✅ カスタムインストールモードを選択しました${NC}"
             INSTALL_MODE="custom"
             ;;
         3)
-            echo -e "${GREEN}✅ SaaS管理UI連携モードを選択しました${NC}"
+            printf '%b\n' "${GREEN}✅ SaaS管理UI連携モードを選択しました${NC}"
             INSTALL_MODE="saas"
             ;;
         *)
-            echo -e "${RED}❌ 無効な選択です${NC}"
+            printf '%b\n' "${RED}❌ 無効な選択です${NC}"
             exit 1
             ;;
     esac
@@ -218,26 +222,26 @@ select_installation_mode() {
 # ============================================
 
 setup_environment() {
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BLUE}  📋 5. 環境変数の設定${NC}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf '%b\n' "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf '%b\n' "${BLUE}  📋 5. 環境変数の設定${NC}"
+    printf '%b\n' "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     
     local env_file="${DOCKER_DIR}/.env"
     local env_template="${DOCKER_DIR}/.env.template"
     
     if [ ! -f "$env_file" ]; then
-        echo -e "${YELLOW}⚠️  .envファイルが見つかりません${NC}"
+        printf '%b\n' "${YELLOW}⚠️  .envファイルが見つかりません${NC}"
         
         if [ -f "$env_template" ]; then
             echo "📝 .env.templateから.envファイルを作成します"
             cp "$env_template" "$env_file"
             chmod 600 "$env_file"
-            echo -e "${GREEN}✅ .envファイルを作成しました: $env_file${NC}"
+            printf '%b\n' "${GREEN}✅ .envファイルを作成しました: $env_file${NC}"
             echo ""
             
             if [ "$INSTALL_MODE" = "saas" ]; then
-                echo -e "${YELLOW}⚠️  重要: SaaS管理UIを使用するには以下の環境変数を設定してください:${NC}"
+                printf '%b\n' "${YELLOW}⚠️  重要: SaaS管理UIを使用するには以下の環境変数を設定してください:${NC}"
                 echo "   1. https://my.openappsec.io にログイン"
                 echo "   2. Deployment Profile を作成または選択"
                 echo "   3. Token をコピー"
@@ -251,7 +255,7 @@ setup_environment() {
                 echo ""
                 read -p "Enterキーを押して続行（またはCtrl+Cで中断）..." dummy
             elif [ "$INSTALL_MODE" = "custom" ]; then
-                echo -e "${YELLOW}⚠️  環境変数をカスタマイズする場合は、.envファイルを編集してください${NC}"
+                printf '%b\n' "${YELLOW}⚠️  環境変数をカスタマイズする場合は、.envファイルを編集してください${NC}"
                 echo "   vim $env_file"
                 echo ""
                 read -p "編集しますか？ (y/N): " edit_answer
@@ -262,15 +266,15 @@ setup_environment() {
                 echo "ℹ️  クイックスタートモード: デフォルト設定を使用します"
             fi
         else
-            echo -e "${RED}❌ エラー: .env.templateが見つかりません${NC}"
+            printf '%b\n' "${RED}❌ エラー: .env.templateが見つかりません${NC}"
             exit 1
         fi
     else
-        echo -e "${GREEN}✅ .envファイルが存在します${NC}"
+        printf '%b\n' "${GREEN}✅ .envファイルが存在します${NC}"
         
         if [ "$INSTALL_MODE" = "saas" ]; then
             echo ""
-            echo -e "${YELLOW}⚠️  SaaS管理UIモードが選択されていますが、.envファイルが既に存在します${NC}"
+            printf '%b\n' "${YELLOW}⚠️  SaaS管理UIモードが選択されていますが、.envファイルが既に存在します${NC}"
             echo "   APPSEC_AGENT_TOKENとAPPSEC_AUTO_POLICY_LOADが正しく設定されているか確認してください"
             echo ""
             read -p ".envファイルを確認しますか？ (y/N): " check_answer
@@ -289,9 +293,9 @@ setup_environment() {
 # ============================================
 
 create_required_directories() {
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BLUE}  📋 6. 必要なディレクトリの作成${NC}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf '%b\n' "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf '%b\n' "${BLUE}  📋 6. 必要なディレクトリの作成${NC}"
+    printf '%b\n' "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     
     local log_dirs=(
@@ -307,7 +311,7 @@ create_required_directories() {
         fi
     done
     
-    echo -e "${GREEN}✅ 必要なディレクトリを作成しました${NC}"
+    printf '%b\n' "${GREEN}✅ 必要なディレクトリを作成しました${NC}"
     echo ""
 }
 
@@ -316,9 +320,9 @@ create_required_directories() {
 # ============================================
 
 start_services() {
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BLUE}  📋 7. Docker Composeでのサービス起動${NC}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf '%b\n' "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf '%b\n' "${BLUE}  📋 7. Docker Composeでのサービス起動${NC}"
+    printf '%b\n' "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     
     cd "$DOCKER_DIR"
@@ -328,16 +332,16 @@ start_services() {
     if [ "$INSTALL_MODE" = "saas" ]; then
         echo "ℹ️  SaaS管理UIモードで起動します"
         if ! docker-compose -f docker-compose.yml -f docker-compose.saas.yml up -d; then
-            echo -e "${RED}❌ サービスの起動に失敗しました${NC}"
+            printf '%b\n' "${RED}❌ サービスの起動に失敗しました${NC}"
             exit 1
         fi
-        echo -e "${GREEN}✅ サービスが起動しました（SaaS連携モード）${NC}"
+        printf '%b\n' "${GREEN}✅ サービスが起動しました（SaaS連携モード）${NC}"
     else
         if ! docker-compose up -d; then
-            echo -e "${RED}❌ サービスの起動に失敗しました${NC}"
+            printf '%b\n' "${RED}❌ サービスの起動に失敗しました${NC}"
             exit 1
         fi
-        echo -e "${GREEN}✅ サービスが起動しました${NC}"
+        printf '%b\n' "${GREEN}✅ サービスが起動しました${NC}"
     fi
     echo ""
 }
@@ -356,7 +360,7 @@ wait_for_service_ready() {
     while [ $attempt -lt $max_attempts ]; do
         if docker-compose ps "$service_name" 2>/dev/null | grep -q "Up"; then
             echo ""
-            echo -e "${GREEN}✅ ${service_name}が起動しました${NC}"
+            printf '%b\n' "${GREEN}✅ ${service_name}が起動しました${NC}"
             return 0
         fi
         
@@ -366,16 +370,16 @@ wait_for_service_ready() {
     done
     
     echo ""
-    echo -e "${YELLOW}⚠️  ${service_name}の起動確認がタイムアウトしました${NC}"
+    printf '%b\n' "${YELLOW}⚠️  ${service_name}の起動確認がタイムアウトしました${NC}"
     echo "   ログを確認してください:"
     echo "   docker-compose logs $service_name"
     return 1
 }
 
 verify_all_services() {
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BLUE}  📋 8. サービスの起動確認${NC}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf '%b\n' "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf '%b\n' "${BLUE}  📋 8. サービスの起動確認${NC}"
+    printf '%b\n' "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     
     cd "$DOCKER_DIR"
@@ -391,7 +395,7 @@ verify_all_services() {
     
     if [ "$failed" = true ]; then
         echo ""
-        echo -e "${YELLOW}⚠️  一部のサービスの起動確認に失敗しました${NC}"
+        printf '%b\n' "${YELLOW}⚠️  一部のサービスの起動確認に失敗しました${NC}"
         echo "   全サービスの状態:"
         docker-compose ps
         echo ""
@@ -401,7 +405,7 @@ verify_all_services() {
     fi
     
     echo ""
-    echo -e "${GREEN}✅ 全サービスが正常に起動しました${NC}"
+    printf '%b\n' "${GREEN}✅ 全サービスが正常に起動しました${NC}"
     
     echo ""
     echo "📋 サービスの状態:"
@@ -425,7 +429,7 @@ check_http_endpoint() {
     while [ $attempt -lt $max_attempts ]; do
         if curl -sf -o /dev/null -w "%{http_code}" "$url" 2>/dev/null | grep -q "$expected_code"; then
             echo ""
-            echo -e "${GREEN}✅ ${description}が応答しました${NC}"
+            printf '%b\n' "${GREEN}✅ ${description}が応答しました${NC}"
             return 0
         fi
         
@@ -435,14 +439,14 @@ check_http_endpoint() {
     done
     
     echo ""
-    echo -e "${YELLOW}⚠️  ${description}の確認がタイムアウトしました${NC}"
+    printf '%b\n' "${YELLOW}⚠️  ${description}の確認がタイムアウトしました${NC}"
     return 1
 }
 
 verify_endpoints() {
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BLUE}  📋 9. エンドポイントの確認${NC}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf '%b\n' "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf '%b\n' "${BLUE}  📋 9. エンドポイントの確認${NC}"
+    printf '%b\n' "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     
     # Health API（開発環境ではdocker-compose.override.ymlでポート公開されている）
@@ -456,10 +460,10 @@ verify_endpoints() {
     echo -n "🔄 Nginxエンドポイントを確認中"
     if curl -sf -H "Host: test.example.com" http://localhost/ >/dev/null 2>&1; then
         echo ""
-        echo -e "${GREEN}✅ Nginxが応答しました${NC}"
+        printf '%b\n' "${GREEN}✅ Nginxが応答しました${NC}"
     else
         echo ""
-        echo -e "${YELLOW}⚠️  Nginxの確認に失敗しました（設定によっては正常）${NC}"
+        printf '%b\n' "${YELLOW}⚠️  Nginxの確認に失敗しました（設定によっては正常）${NC}"
     fi
     
     echo ""
@@ -470,9 +474,9 @@ verify_endpoints() {
 # ============================================
 
 show_completion_message() {
-    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${GREEN}  ✅ インストール完了${NC}"
-    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf '%b\n' "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf '%b\n' "${GREEN}  ✅ インストール完了${NC}"
+    printf '%b\n' "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     echo "次のステップ:"
     echo ""
@@ -520,10 +524,10 @@ show_completion_message() {
 # ============================================
 
 main() {
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BLUE}  OpenAppSec インストールスクリプト${NC}"
-    echo -e "${BLUE}  Task 5.7: インストール・セットアップスクリプト実装${NC}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf '%b\n' "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf '%b\n' "${BLUE}  OpenAppSec インストールスクリプト${NC}"
+    printf '%b\n' "${BLUE}  Task 5.7: インストール・セットアップスクリプト実装${NC}"
+    printf '%b\n' "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     
     # 1. 依存関係の確認
