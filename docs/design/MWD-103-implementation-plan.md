@@ -45,7 +45,7 @@
 ### 現在のディレクトリ構造
 
 ```
-/Users/kencom/github/MrWebDefence-Engine/
+<PROJECT_ROOT>/
 ├── docker/
 │   ├── docker-compose.yml          # メイン構成
 │   ├── docker-compose.override.yml # 開発環境用オーバーライド

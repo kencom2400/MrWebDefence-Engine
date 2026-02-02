@@ -163,7 +163,7 @@ check_existing_containers() {
         echo ""
         read -p "既存のコンテナを停止して再インストールしますか？ (y/N): " answer
         
-        if [ "$answer" = "y" ] || [ "$answer" = "Y" ]; then
+        if [[ "$answer" =~ ^[Yy]$ ]]; then
             echo "🔄 既存のコンテナを停止中..."
             docker-compose down
             echo -e "${GREEN}✅ 既存のコンテナを停止しました${NC}"
@@ -232,6 +232,7 @@ setup_environment() {
         if [ -f "$env_template" ]; then
             echo "📝 .env.templateから.envファイルを作成します"
             cp "$env_template" "$env_file"
+            chmod 600 "$env_file"
             echo -e "${GREEN}✅ .envファイルを作成しました: $env_file${NC}"
             echo ""
             
@@ -254,7 +255,7 @@ setup_environment() {
                 echo "   vim $env_file"
                 echo ""
                 read -p "編集しますか？ (y/N): " edit_answer
-                if [ "$edit_answer" = "y" ] || [ "$edit_answer" = "Y" ]; then
+                if [[ "$edit_answer" =~ ^[Yy]$ ]]; then
                     ${EDITOR:-vim} "$env_file"
                 fi
             else
@@ -273,7 +274,7 @@ setup_environment() {
             echo "   APPSEC_AGENT_TOKENとAPPSEC_AUTO_POLICY_LOADが正しく設定されているか確認してください"
             echo ""
             read -p ".envファイルを確認しますか？ (y/N): " check_answer
-            if [ "$check_answer" = "y" ] || [ "$check_answer" = "Y" ]; then
+            if [[ "$check_answer" =~ ^[Yy]$ ]]; then
                 cat "$env_file"
                 echo ""
                 read -p "Enterキーを押して続行..." dummy
@@ -326,19 +327,17 @@ start_services() {
     
     if [ "$INSTALL_MODE" = "saas" ]; then
         echo "ℹ️  SaaS管理UIモードで起動します"
-        if docker-compose -f docker-compose.yml -f docker-compose.saas.yml up -d; then
-            echo -e "${GREEN}✅ サービスが起動しました（SaaS連携モード）${NC}"
-        else
+        if ! docker-compose -f docker-compose.yml -f docker-compose.saas.yml up -d; then
             echo -e "${RED}❌ サービスの起動に失敗しました${NC}"
             exit 1
         fi
+        echo -e "${GREEN}✅ サービスが起動しました（SaaS連携モード）${NC}"
     else
-        if docker-compose up -d; then
-            echo -e "${GREEN}✅ サービスが起動しました${NC}"
-        else
+        if ! docker-compose up -d; then
             echo -e "${RED}❌ サービスの起動に失敗しました${NC}"
             exit 1
         fi
+        echo -e "${GREEN}✅ サービスが起動しました${NC}"
     fi
     echo ""
 }
@@ -489,16 +488,21 @@ show_completion_message() {
         echo "3. SaaS管理UIでの確認:"
         echo "   https://my.openappsec.io にアクセスして、Agentが接続されているか確認してください"
         echo ""
+        echo "4. ヘルスチェック:"
+    else
+        echo "3. ヘルスチェック:"
     fi
-    
-    echo "3. ヘルスチェック:"
     if [ -f "${DOCKER_DIR}/docker-compose.override.yml" ]; then
         echo "   curl http://localhost:8888/health"
     else
         echo "   docker-compose exec nginx curl http://health-api:8888/health"
     fi
     echo ""
-    echo "4. サービスの管理:"
+    if [ "$INSTALL_MODE" = "saas" ]; then
+        echo "5. サービスの管理:"
+    else
+        echo "4. サービスの管理:"
+    fi
     echo "   cd ${DOCKER_DIR}"
     echo "   docker-compose ps      # 状態確認"
     echo "   docker-compose restart # 再起動"
