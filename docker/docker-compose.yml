@@ -1,8 +1,11 @@
 services:
   nginx:
-    # OpenAppSec公式のNginxイメージ（Attachment Moduleが組み込まれている）
+    # OpenAppSec公式のNginxイメージ（GeoIP機能は実装PR後に有効化）
     # 注意: 特定バージョンを指定することを推奨（再現性のため）
-    # 現在は動作確認のため:latestを使用
+    # build:
+    #   context: ./nginx
+    #   dockerfile: Dockerfile
+    # 既存イメージを使用する場合（GeoIP機能なし）:
     image: ghcr.io/openappsec/nginx-attachment:latest
     platform: linux/amd64
     container_name: mwd-nginx
@@ -18,6 +21,8 @@ services:
       # 共有メモリ: OpenAppSec AgentとのIPC通信に使用
       # 公式ドキュメント推奨のマウントポイント: /dev/shm/check-point
       - nginx-shm:/dev/shm/check-point
+      # GeoIPデータベース（共有ボリューム、読み取り専用）
+      - geoip-data:/usr/share/GeoIP:ro
     ports:
       - "80:80"
       - "443:443"
@@ -317,6 +322,36 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  geoip-updater:
+    # GeoIPデータベース自動更新サービス
+    build:
+      context: ../geoip-updater
+      dockerfile: Dockerfile
+    container_name: mwd-geoip-updater
+    volumes:
+      # GeoIPデータベース（共有ボリューム、読み書き可能）
+      - geoip-data:/usr/share/GeoIP:rw
+      # Dockerソケット（Nginxリロード用）
+      # セキュリティ警告: Dockerソケットのマウントはセキュリティリスクがあります
+      # 本番環境では、適切なアクセス制御を実施してください
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - MAXMIND_LICENSE_KEY=${MAXMIND_LICENSE_KEY:-}
+      - MAXMIND_ACCOUNT_ID=${MAXMIND_ACCOUNT_ID:-}
+      - GEOIP_DB_PATH=/usr/share/GeoIP
+      - NGINX_CONTAINER_NAME=mwd-nginx
+      - BACKUP_RETENTION_DAYS=${GEOIP_BACKUP_RETENTION_DAYS:-7}
+    networks:
+      - mwd-network
+    depends_on:
+      - nginx
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   # 共有メモリ用のtmpfsボリューム
   # OpenAppSec AgentとNginx間のIPC通信に使用
@@ -330,6 +365,9 @@ volumes:
     driver: local
   # Redisデータの永続化
   redis-data:
+    driver: local
+  # GeoIPデータベース用（共有ボリューム）
+  geoip-data:
     driver: local
 
 networks:

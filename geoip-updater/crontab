@@ -1,0 +1,8 @@
+# GeoIPデータベース自動更新
+# 毎週火曜日 3:00 AM JST（月曜日 18:00 UTC）
+0 18 * * 1 /app/geoip-updater.sh update >> /var/log/geoip-updater.log 2>&1
+
+# ログファイルのローテーション（毎月1日 4:00 AM JST）
+0 19 1 * * find /var/log -name "geoip-updater.log.*" -mtime +30 -delete >> /var/log/geoip-updater.log 2>&1
+
+# 空行（cron要件）
