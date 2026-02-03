@@ -136,7 +136,8 @@ validate_container_name() {
 ```cron
 # 毎日 18:00 UTC（3:00 AM JST）基準で証明書更新チェック
 # ランダム待機時間（0〜60分）を追加し、Let's Encryptサーバーへの負荷を分散
-0 18 * * * sleep $(shuf -i 0-3600 -n 1); /app/certbot-manager.sh renew >> /var/log/certbot-manager.log 2>&1
+# ログはcrondの標準出力に出力され、docker logsで確認可能
+0 18 * * * sleep $(shuf -i 0-3600 -n 1); /app/certbot-manager.sh renew
 ```
 
 **チェックリスト**:
@@ -253,21 +254,21 @@ services:
       - "443:443"  # HTTPS用ポート追加
   
   certbot-manager:
+    container_name: mwd-certbot-manager
     build:
       context: ../certbot-manager
       dockerfile: Dockerfile
     volumes:
       - certbot-data:/etc/letsencrypt:rw
       - certbot-webroot:/var/www/certbot:rw
-      - /var/run/docker.sock:/var/run/docker.sock:rw  # docker execに必要
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # docker execに必要（読み取り専用で十分）
     environment:
       - EMAIL=${CERTBOT_EMAIL}
       - NGINX_CONTAINER_NAME=mwd-nginx
       - DOMAINS=${CERTBOT_DOMAINS}
       - STAGING=${CERTBOT_STAGING:-false}
-    # セキュリティ注意: Dockerソケットへの書き込みアクセスは、
-    # コンテナにホストのDocker APIへの完全なアクセスを与えます。
-    # 本番環境では、より制限的なアクセス制御を検討してください。
+    # セキュリティ注意: Dockerソケットは読み取り専用でマウントしています。
+    # これによりdocker execは実行可能ですが、コンテナ侵害時のリスクを低減できます。
 
 volumes:
   certbot-data:
@@ -371,6 +372,8 @@ test_security_headers() {
     local fqdn="$1"
     echo "🔍 セキュリティヘッダーテスト: $fqdn"
     
+    # ステージング証明書など、信頼できない証明書を許容するために -k を使用
+    # 本番環境では証明書検証を有効にすることを推奨
     local headers=$(curl -I -k "https://$fqdn/" 2>&1)
     
     if echo "$headers" | grep -q "Strict-Transport-Security"; then
@@ -441,7 +444,7 @@ test_security_headers() {
    docker-compose up -d
    
    # 初回証明書取得
-   docker exec mwd-certbot-manager /app/certbot-manager.sh init
+   docker-compose exec certbot-manager /app/certbot-manager.sh init
    
    # テスト実行
    ./scripts/openappsec/test-ssl-tls.sh --fqdn test.example.com
