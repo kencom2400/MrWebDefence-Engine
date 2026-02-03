@@ -181,12 +181,15 @@ services:
     volumes:
       - certbot-data:/etc/letsencrypt:rw
       - certbot-webroot:/var/www/certbot:rw
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/run/docker.sock:/var/run/docker.sock:rw  # docker execに必要
     environment:
       - EMAIL=${CERTBOT_EMAIL}
       - NGINX_CONTAINER_NAME=mwd-nginx
       - DOMAINS=${CERTBOT_DOMAINS}
       - STAGING=${CERTBOT_STAGING:-false}
+    # セキュリティ注意: Dockerソケットへの書き込みアクセスは、
+    # コンテナにホストのDocker APIへの完全なアクセスを与えます。
+    # 本番環境では、より制限的なアクセス制御を検討してください。
 
 volumes:
   certbot-data:
@@ -203,7 +206,6 @@ volumes:
 | `CERTBOT_DOMAINS` | 証明書取得対象FQDN（カンマ区切り） | ✅ | - | `example.com,test.example.com` |
 | `CERTBOT_STAGING` | Let's Encryptステージング環境使用 | ❌ | `false` | `true` / `false` |
 | `NGINX_CONTAINER_NAME` | Nginxコンテナ名 | ✅ | `mwd-nginx` | `mwd-nginx` |
-| `CERT_RENEWAL_HOUR` | 証明書更新実行時刻 | ❌ | `3` | `3` (3:00 AM) |
 
 ## 5. Nginx設定生成
 
@@ -270,7 +272,7 @@ server {
     # セキュリティヘッダー
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
+    # 注: X-XSS-Protectionは非推奨のため除外（将来的にContent-Security-Policyを導入予定）
     
     # アクセスログ
     access_log /var/log/nginx/example.com/access.log json_combined;
@@ -320,7 +322,7 @@ generate_ssl_config() {
     # セキュリティヘッダー
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
+    # 注: X-XSS-Protectionは非推奨のため除外（将来的にContent-Security-Policyを導入予定）
 EOF
     else
         # 証明書がない場合は空文字列を返す
@@ -354,9 +356,11 @@ EOF
 
 #### 処理フロー（`renew`コマンド）
 
-1. `certbot renew --quiet`実行
-2. 更新があった場合、Nginx再読み込み
+1. `certbot renew --quiet --deploy-hook "docker exec mwd-nginx nginx -s reload"`実行
+2. 証明書が更新された場合、deploy-hookが自動的にNginx再読み込みを実行
 3. ログ記録
+
+**注**: `--deploy-hook`を使用することで、証明書が正常に更新された後にのみNginxがリロードされ、スクリプトのロジックが簡素化されます。
 
 #### エラーハンドリング
 
@@ -413,9 +417,12 @@ declare -a cmd=("docker" "exec" "$NGINX_CONTAINER_NAME" "nginx" "-s" "reload")
 ### 7.1 証明書更新スケジュール
 
 ```cron
-# 毎日 3:00 AM JST（前日18:00 UTC）に証明書更新チェック
-0 18 * * * /app/certbot-manager.sh renew >> /var/log/certbot-manager.log 2>&1
+# 毎日 18:00 UTC（3:00 AM JST）基準で証明書更新チェック
+# ランダム待機時間（0〜60分）を追加し、Let's Encryptサーバーへの負荷を分散
+0 18 * * * sleep $(shuf -i 0-3600 -n 1); /app/certbot-manager.sh renew >> /var/log/certbot-manager.log 2>&1
 ```
+
+**注**: ランダム待機時間を追加することで、多くのシステムが一斉にアクセスする「サンダリング・ハード問題」を回避し、Let's Encryptサーバーへの負荷を分散します。
 
 ### 7.2 Let's Encryptの制限
 
