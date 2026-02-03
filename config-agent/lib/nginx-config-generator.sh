@@ -485,7 +485,17 @@ generate_fqdn_config_file() {
     
     # GeoIPアクセス制御ブロックを生成
     local geoip_access_control=""
+    local geoip_error_page=""
     if [[ "$geoip_enabled" == "true" ]]; then
+        geoip_error_page="
+    # GeoIP拒否時のカスタムレスポンス
+    error_page 403 @geoip_denied;
+    location @geoip_denied {
+        internal;
+        default_type application/json;
+        return 403 '{\"error\": \"Access denied\", \"reason\": \"GeoIP policy violation\"}';
+    }"
+        
         geoip_access_control="
     # GeoIPアクセス制御
     if (\$${sanitized_fqdn}_access_denied = 1) {
@@ -504,6 +514,7 @@ server {
 
     # 顧客名を変数に設定（ログフォーマットで使用）
     set \$customer_name "${customer_name}";
+${geoip_error_page}
 ${geoip_access_control}
 
     # アクセスログ（FQDN別ディレクトリ、JSON形式）
