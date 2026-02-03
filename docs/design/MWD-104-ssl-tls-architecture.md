@@ -138,7 +138,7 @@ sequenceDiagram
 | コンポーネント | 技術 | バージョン |
 |---------------|------|-----------|
 | SSL/TLS証明書 | Let's Encrypt | - |
-| 証明書管理ツール | Certbot | latest |
+| 証明書管理ツール | Certbot | 2.8.0 |
 | Webサーバー | Nginx | 1.24+ |
 | OS | Alpine Linux | 3.18+ |
 | スケジューラー | cron | - |
@@ -307,15 +307,20 @@ generate_ssl_config() {
     # SSL/TLSプロトコル設定
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_prefer_server_ciphers on;
-    ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256';
+    ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384';
     
     # OCSP Stapling
     ssl_stapling on;
     ssl_stapling_verify on;
-    resolver 8.8.8.8 8.8.4.4 valid=300s;
+    resolver 127.0.0.11 valid=300s; # Docker内部DNSリゾルバを利用
     
     # HSTS
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    
+    # セキュリティヘッダー
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
 EOF
     else
         # 証明書がない場合は空文字列を返す
@@ -487,7 +492,7 @@ test_https_connection() {
     local fqdn="$1"
     echo "🔍 HTTPS接続テスト: $fqdn"
     
-    if curl -I -k "https://$fqdn/health" 2>&1 | grep -q "200 OK"; then
+    if curl -I "https://$fqdn/health" 2>&1 | grep -q "200 OK"; then
         echo "✅ HTTPS接続成功"
     else
         echo "❌ HTTPS接続失敗"
@@ -609,6 +614,7 @@ Cert not yet due for renewal
 
 **対処方法**: 強制更新
 ```bash
+# 注意: レート制限に抵触する可能性があるため、テスト環境での使用を推奨
 docker exec mwd-certbot-manager certbot renew --force-renewal
 ```
 
