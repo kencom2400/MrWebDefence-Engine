@@ -261,7 +261,7 @@ server {
     # OCSP Stapling
     ssl_stapling on;
     ssl_stapling_verify on;
-    resolver 8.8.8.8 8.8.4.4 valid=300s;
+    resolver 127.0.0.11 valid=300s; # Docker内部DNSリゾルバを利用
     resolver_timeout 5s;
     
     # HSTS (HTTP Strict Transport Security)
