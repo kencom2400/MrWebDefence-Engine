@@ -67,9 +67,6 @@ COPY crontab /etc/crontabs/root
 # 実行権限を付与
 RUN chmod +x /app/certbot-manager.sh
 
-# ログディレクトリを作成
-RUN mkdir -p /var/log
-
 # crondをフォアグラウンドで実行
 CMD ["crond", "-f", "-l", "2"]
 ```
@@ -143,7 +140,7 @@ validate_container_name() {
 **チェックリスト**:
 - [ ] 毎日18:00 UTCに実行
 - [ ] ランダム待機時間（0〜3600秒）を追加
-- [ ] ログを`/var/log/certbot-manager.log`に出力
+- [ ] ログを標準出力に出力（`docker logs`で確認可能）
 
 ---
 
@@ -336,7 +333,8 @@ test_https_connection() {
     local fqdn="$1"
     echo "🔍 HTTPS接続テスト: $fqdn"
     
-    if curl -I "https://$fqdn/health" 2>&1 | grep -q "200 OK"; then
+    # ステージング証明書など、信頼できない証明書を許容するために -k を使用
+    if curl -I -k "https://$fqdn/health" 2>&1 | grep -q "200 OK"; then
         echo "✅ HTTPS接続成功"
     else
         echo "❌ HTTPS接続失敗"
