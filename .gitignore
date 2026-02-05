@@ -49,6 +49,10 @@ tmp/
 # Nginxリロードシグナルファイル（自動生成）
 docker/nginx/conf.d/.reload_signal
 
+# GeoIP設定ファイル（ConfigAgentが自動生成）
+docker/nginx/geoip/*.conf
+!docker/nginx/geoip/.gitkeep
+
 # ログファイル（Nginx、OpenAppSec、Fluentd）
 # ディレクトリ全体を除外（ローテート後のファイルも含む）
 docker/nginx/logs/
