@@ -677,3 +677,121 @@ generate_nginx_configs() {
     
     echo "✅ Nginx設定ファイルの生成が完了しました"
 }
+
+# ========================================
+# SSL/TLS設定生成関数
+# ========================================
+
+# SSL設定ファイルを生成（HTTPS設定）
+generate_ssl_config() {
+    local fqdn="$1"
+    local config_file="$2"
+    local cert_path="/etc/letsencrypt/live/${fqdn}"
+    
+    cat > "$config_file" << EOF
+# HTTPS設定: ${fqdn}
+# 自動生成: $(date '+%Y-%m-%d %H:%M:%S')
+
+server {
+    listen 443 ssl http2;
+    server_name ${fqdn};
+    
+    # SSL証明書
+    ssl_certificate     ${cert_path}/fullchain.pem;
+    ssl_certificate_key ${cert_path}/privkey.pem;
+    
+    # SSL設定
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384';
+    ssl_prefer_server_ciphers off;
+    
+    # セキュリティヘッダー
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    
+    # アクセスログ（FQDN別ディレクトリ、JSON形式）
+    access_log /var/log/nginx/${fqdn}/access.log json_combined;
+    error_log /var/log/nginx/${fqdn}/error.log warn;
+    
+    location / {
+        # バックエンドへのプロキシ
+        proxy_pass http://httpbin.org:80;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        
+        # タイムアウト設定
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+    
+    # ヘルスチェック用エンドポイント
+    location /health {
+        access_log off;
+        return 200 "healthy\n";
+        add_header Content-Type text/plain;
+    }
+}
+EOF
+}
+
+# HTTP→HTTPSリダイレクト設定を生成
+generate_http_redirect_config() {
+    local fqdn="$1"
+    local config_file="$2"
+    
+    cat > "$config_file" << EOF
+# HTTP設定: ${fqdn}
+# ACME Challenge + HTTPS リダイレクト
+# 自動生成: $(date '+%Y-%m-%d %H:%M:%S')
+
+server {
+    listen 80;
+    server_name ${fqdn};
+    
+    # ACME Challenge用ディレクトリ
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type "text/plain";
+        allow all;
+    }
+    
+    # HTTP→HTTPSリダイレクト
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+EOF
+}
+
+# SSL設定を含むFQDN設定ファイルを生成
+generate_fqdn_ssl_config() {
+    local fqdn="$1"
+    local output_dir="$2"
+    local cert_path="/etc/letsencrypt/live/${fqdn}"
+    
+    # 証明書の存在確認
+    if [ ! -d "$cert_path" ] || [ ! -f "${cert_path}/fullchain.pem" ]; then
+        echo "⚠️  警告: SSL証明書が見つかりません: $fqdn"
+        echo "   証明書パス: $cert_path"
+        echo "   HTTP設定のみを生成します"
+        echo "   証明書取得後、ConfigAgentを再実行してください"
+        return 0
+    fi
+    
+    echo "🔐 SSL設定を生成中: $fqdn"
+    
+    # HTTPS設定ファイルを生成
+    local ssl_config_file="${output_dir}/conf.d/${fqdn}-ssl.conf"
+    generate_ssl_config "$fqdn" "$ssl_config_file"
+    echo "  ✅ HTTPS設定: $ssl_config_file"
+    
+    # HTTP→HTTPSリダイレクト設定を生成
+    local http_config_file="${output_dir}/conf.d/${fqdn}.conf"
+    generate_http_redirect_config "$fqdn" "$http_config_file"
+    echo "  ✅ HTTPリダイレクト設定: $http_config_file"
+}

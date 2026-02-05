@@ -24,8 +24,13 @@ services:
       - nginx-shm:/dev/shm/check-point
       # GeoIPデータベース（共有ボリューム、読み取り専用）
       - geoip-data:/usr/share/GeoIP:ro
+      # Certbot用webrootディレクトリ（ACME Challenge用）
+      - certbot-webroot:/var/www/certbot:ro
+      # SSL証明書（読み取り専用）
+      - certbot-data:/etc/letsencrypt:ro
     ports:
       - "80:80"
+      - "443:443"
       - "443:443"
     depends_on:
       - openappsec-agent
@@ -354,6 +359,33 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  certbot-manager:
+    # SSL/TLS証明書管理サービス
+    container_name: mwd-certbot-manager
+    build:
+      context: ../certbot-manager
+      dockerfile: Dockerfile
+    volumes:
+      # 証明書データ（読み書き可能）
+      - certbot-data:/etc/letsencrypt:rw
+      # ACME Challenge用webroot（読み書き可能）
+      - certbot-webroot:/var/www/certbot:rw
+      # Dockerソケット（Nginxリロード用、読み取り専用で十分）
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - EMAIL=${CERTBOT_EMAIL}
+      - NGINX_CONTAINER_NAME=mwd-nginx
+      - DOMAINS=${CERTBOT_DOMAINS}
+      - STAGING=${CERTBOT_STAGING:-false}
+    networks:
+      - mwd-network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   # 共有メモリ用のtmpfsボリューム
   # OpenAppSec AgentとNginx間のIPC通信に使用
@@ -370,6 +402,12 @@ volumes:
     driver: local
   # GeoIPデータベース用（共有ボリューム）
   geoip-data:
+    driver: local
+  # Certbot証明書データ用
+  certbot-data:
+    driver: local
+  # Certbot webroot用（ACME Challenge）
+  certbot-webroot:
     driver: local
 
 networks:

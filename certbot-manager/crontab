@@ -1,0 +1,4 @@
+# 毎日 18:00 UTC（3:00 AM JST）基準で証明書更新チェック
+# ランダム待機時間（0〜60分）を追加し、Let's Encryptサーバーへの負荷を分散
+# ログはcrondの標準出力に出力され、docker logsで確認可能
+0 18 * * * sleep $(shuf -i 0-3600 -n 1); /app/certbot-manager.sh renew
