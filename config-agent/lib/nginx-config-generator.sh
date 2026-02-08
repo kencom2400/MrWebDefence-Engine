@@ -634,11 +634,24 @@ generate_nginx_configs() {
         trap - RETURN
         rm -f "$jq_error"
         
-        # GeoIP設定ファイルを生成（httpコンテキスト用）
-        generate_geoip_config_file "$fqdn" "$fqdn_config" "$output_dir"
+        # バックエンド情報を取得
+        local backend_host
+        local backend_port
+        backend_host=$(echo "$fqdn_config" | jq -r '.backend.host // "httpbin.org"')
+        backend_port=$(echo "$fqdn_config" | jq -r '.backend.port // 80')
         
-        # FQDN設定ファイルを生成（serverコンテキスト用）
-        generate_fqdn_config_file "$fqdn" "$fqdn_config" "$customer_name" "$output_dir"
+        # SSL設定の生成を試みる（証明書が存在する場合）
+        if generate_fqdn_ssl_config "$fqdn" "$output_dir" "$backend_host" "$backend_port"; then
+            # SSL設定が成功した場合、GeoIP設定は生成しない
+            echo "  ✅ SSL設定生成完了: $fqdn"
+        else
+            # 証明書が存在しない場合、通常のHTTP設定を生成
+            # GeoIP設定ファイルを生成（httpコンテキスト用）
+            generate_geoip_config_file "$fqdn" "$fqdn_config" "$output_dir"
+            
+            # FQDN設定ファイルを生成（serverコンテキスト用）
+            generate_fqdn_config_file "$fqdn" "$fqdn_config" "$customer_name" "$output_dir"
+        fi
     done
     
     # 無効化されたFQDNの設定ファイルを削除
@@ -686,6 +699,8 @@ generate_nginx_configs() {
 generate_ssl_config() {
     local fqdn="$1"
     local config_file="$2"
+    local backend_host="$3"
+    local backend_port="$4"
     local cert_path="/etc/letsencrypt/live/${fqdn}"
     
     cat > "$config_file" << EOF
@@ -709,7 +724,6 @@ server {
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
     
     # アクセスログ（FQDN別ディレクトリ、JSON形式）
     access_log /var/log/nginx/${fqdn}/access.log json_combined;
@@ -717,7 +731,7 @@ server {
     
     location / {
         # バックエンドへのプロキシ
-        proxy_pass http://httpbin.org:80;
+        proxy_pass http://${backend_host}:${backend_port};
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -772,26 +786,30 @@ EOF
 generate_fqdn_ssl_config() {
     local fqdn="$1"
     local output_dir="$2"
+    local backend_host="$3"
+    local backend_port="$4"
     local cert_path="/etc/letsencrypt/live/${fqdn}"
     
     # 証明書の存在確認
     if [ ! -d "$cert_path" ] || [ ! -f "${cert_path}/fullchain.pem" ]; then
         echo "⚠️  警告: SSL証明書が見つかりません: $fqdn"
         echo "   証明書パス: $cert_path"
-        echo "   HTTP設定のみを生成します"
+        echo "   HTTP設定のみを生成します（既存のgenerate_fqdn_config_fileを使用）"
         echo "   証明書取得後、ConfigAgentを再実行してください"
-        return 0
+        return 1
     fi
     
     echo "🔐 SSL設定を生成中: $fqdn"
     
     # HTTPS設定ファイルを生成
     local ssl_config_file="${output_dir}/conf.d/${fqdn}-ssl.conf"
-    generate_ssl_config "$fqdn" "$ssl_config_file"
+    generate_ssl_config "$fqdn" "$ssl_config_file" "$backend_host" "$backend_port"
     echo "  ✅ HTTPS設定: $ssl_config_file"
     
     # HTTP→HTTPSリダイレクト設定を生成
     local http_config_file="${output_dir}/conf.d/${fqdn}.conf"
     generate_http_redirect_config "$fqdn" "$http_config_file"
     echo "  ✅ HTTPリダイレクト設定: $http_config_file"
+    
+    return 0
 }

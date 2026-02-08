@@ -61,6 +61,14 @@ validate_domain() {
     fi
 }
 
+validate_container_name() {
+    local container_name="$1"
+    if [[ ! "$container_name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
+        log_error "無効なコンテナ名形式: $container_name"
+        return 1
+    fi
+}
+
 validate_env() {
     log_info "環境変数を検証中..."
     
@@ -82,6 +90,10 @@ validate_env() {
         domain=$(echo "$domain" | xargs)  # トリム
         validate_domain "$domain" || return 1
     done
+    
+    # コンテナ名の検証（コマンドインジェクション対策）
+    local container_name="${NGINX_CONTAINER_NAME:-mwd-nginx}"
+    validate_container_name "$container_name" || return 1
     
     log_info "環境変数の検証が完了しました"
     log_info "  EMAIL: $EMAIL"
@@ -144,7 +156,7 @@ cmd_init() {
     local cmd=$(build_certbot_command "certonly")
     log_info "実行コマンド: $cmd"
     
-    if eval "$cmd"; then
+    if sh -c "$cmd"; then
         log_info "✅ 証明書の取得に成功しました"
         log_info "証明書ディレクトリ: $CERTBOT_DIR/live/$first_domain"
         
@@ -176,7 +188,7 @@ cmd_renew() {
     local cmd=$(build_certbot_command "renew")
     log_info "実行コマンド: $cmd"
     
-    if eval "$cmd"; then
+    if sh -c "$cmd"; then
         log_info "✅ 証明書の更新チェックが完了しました"
         return 0
     else

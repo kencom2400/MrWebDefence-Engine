@@ -362,7 +362,7 @@ docker-compose exec nginx nginx -s reload
 
 - 証明書データは`certbot-data`ボリュームに保存
 - Nginxは読み取り専用でマウント
-- バックアップを定期的に取得
+- バックアップは手動で取得することを推奨（自動バックアップ機能はPhase 2で実装予定）
 
 ### 4. TLS設定
 
