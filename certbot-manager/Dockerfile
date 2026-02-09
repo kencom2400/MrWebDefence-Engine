@@ -4,7 +4,8 @@ FROM certbot/certbot:v2.8.0
 RUN apk add --no-cache \
     bash \
     docker-cli \
-    tzdata
+    tzdata \
+    coreutils
 
 # タイムゾーン設定（JST）
 ENV TZ=Asia/Tokyo

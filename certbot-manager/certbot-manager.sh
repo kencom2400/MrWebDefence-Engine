@@ -108,11 +108,11 @@ validate_env() {
 
 build_certbot_command() {
     local action="$1"
-    local cmd="certbot $action --webroot --webroot-path=$WEBROOT_DIR"
+    local -a cmd_array=("certbot" "$action" "--webroot" "--webroot-path=$WEBROOT_DIR")
     
     # ステージング環境フラグ
     if [ "${STAGING:-false}" = "true" ]; then
-        cmd="$cmd --staging"
+        cmd_array+=("--staging")
         log_info "ステージング環境モードで実行します"
     fi
     
@@ -122,15 +122,18 @@ build_certbot_command() {
         IFS=',' read -ra DOMAIN_ARRAY <<< "$DOMAINS"
         for domain in "${DOMAIN_ARRAY[@]}"; do
             domain=$(echo "$domain" | xargs)
-            cmd="$cmd -d $domain"
+            cmd_array+=("-d" "$domain")
         done
         
-        cmd="$cmd --email $EMAIL --agree-tos --non-interactive"
+        cmd_array+=("--email" "$EMAIL" "--agree-tos" "--non-interactive")
     elif [ "$action" = "renew" ]; then
-        cmd="$cmd --quiet --deploy-hook 'docker exec ${NGINX_CONTAINER_NAME:-mwd-nginx} nginx -s reload'"
+        cmd_array+=("--quiet")
+        # deploy-hookは文字列として渡す必要があるため、ここでは指定しない
+        # 代わりにrenew成功後に直接Nginxをリロードする
     fi
     
-    echo "$cmd"
+    # 配列を返す（グローバル変数経由）
+    CERTBOT_CMD_ARRAY=("${cmd_array[@]}")
 }
 
 # ============================================================================
@@ -153,10 +156,10 @@ cmd_init() {
     fi
     
     # Certbotコマンドを構築して実行
-    local cmd=$(build_certbot_command "certonly")
-    log_info "実行コマンド: $cmd"
+    build_certbot_command "certonly"
+    log_info "実行コマンド: ${CERTBOT_CMD_ARRAY[*]}"
     
-    if sh -c "$cmd"; then
+    if "${CERTBOT_CMD_ARRAY[@]}"; then
         log_info "✅ 証明書の取得に成功しました"
         log_info "証明書ディレクトリ: $CERTBOT_DIR/live/$first_domain"
         
@@ -185,11 +188,20 @@ cmd_renew() {
     validate_env || return 1
     
     # Certbotコマンドを構築して実行
-    local cmd=$(build_certbot_command "renew")
-    log_info "実行コマンド: $cmd"
+    build_certbot_command "renew"
+    log_info "実行コマンド: ${CERTBOT_CMD_ARRAY[*]}"
     
-    if sh -c "$cmd"; then
+    if "${CERTBOT_CMD_ARRAY[@]}"; then
         log_info "✅ 証明書の更新チェックが完了しました"
+        
+        # 更新が成功した場合、Nginxをリロード
+        log_info "Nginx設定をリロードしています..."
+        if docker exec "${NGINX_CONTAINER_NAME:-mwd-nginx}" nginx -s reload 2>/dev/null; then
+            log_info "✅ Nginxのリロードに成功しました"
+        else
+            log_warn "Nginxのリロードに失敗しました（コンテナが起動していない可能性があります）"
+        fi
+        
         return 0
     else
         log_error "❌ 証明書の更新に失敗しました"

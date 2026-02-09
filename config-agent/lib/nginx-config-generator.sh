@@ -721,6 +721,9 @@ server {
     ssl_prefer_server_ciphers off;
     
     # セキュリティヘッダー
+    # HSTS: HTTPS強制（max-age=1年）
+    # 注意: includeSubDomainsを指定すると、すべてのサブドメインにHTTPSが強制されます
+    # サブドメインがHTTPSに対応していない場合は、includeSubDomainsを削除してください
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
@@ -788,6 +791,13 @@ generate_fqdn_ssl_config() {
     local output_dir="$2"
     local backend_host="$3"
     local backend_port="$4"
+    
+    # FQDN検証
+    if ! validate_fqdn "$fqdn"; then
+        echo "⚠️  警告: 無効なFQDN形式、スキップします: $fqdn" >&2
+        return 1
+    fi
+    
     local cert_path="/etc/letsencrypt/live/${fqdn}"
     
     # 証明書の存在確認
