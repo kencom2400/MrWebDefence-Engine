@@ -47,8 +47,7 @@ services:
     # Dockerソケットがマウントされていない場合の代替手段として使用
     entrypoint: >
       sh -c "
-      if [ -f /usr/local/bin/watch-config.sh ]; then
-        chmod +x /usr/local/bin/watch-config.sh &&
+      if [ -f /usr/local/bin/watch-config.sh ] && [ -x /usr/local/bin/watch-config.sh ]; then
         /usr/local/bin/watch-config.sh &
       fi &&
       exec nginx -g 'daemon off;'
