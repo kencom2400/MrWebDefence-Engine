@@ -140,6 +140,36 @@ jobs:
           
           # Nginx設定をリロード（ConfigAgentが生成した設定を反映）
           echo "Reloading Nginx to apply generated configuration..."
+          
+          # 生成された設定ファイルの内容を確認（デバッグ用）
+          echo "=== Generated configuration files ==="
+          for conf_file in nginx/conf.d/*.conf; do
+            if [ -f "$conf_file" ]; then
+              echo "--- $conf_file ---"
+              head -20 "$conf_file" || true
+              echo ""
+            fi
+          done
+          
+          # Nginx設定の構文チェック
+          echo "=== Nginx configuration test ==="
+          if docker-compose exec -T nginx nginx -t 2>&1 | tee /tmp/nginx-test.log; then
+            echo "✅ Nginx configuration is valid"
+          else
+            echo "❌ Nginx configuration has errors"
+            cat /tmp/nginx-test.log || true
+            echo ""
+            echo "=== Full configuration files ==="
+            for conf_file in nginx/conf.d/*.conf; do
+              if [ -f "$conf_file" ]; then
+                echo "====== $conf_file ======"
+                cat "$conf_file" || true
+                echo ""
+              fi
+            done
+            exit 1
+          fi
+          
           if docker-compose restart nginx; then
             echo "✅ Nginx restarted successfully"
             sleep 3
