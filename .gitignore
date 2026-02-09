@@ -49,6 +49,11 @@ tmp/
 # Nginxリロードシグナルファイル（自動生成）
 docker/nginx/conf.d/.reload_signal
 
+# ConfigAgentが自動生成するNginx設定ファイル
+# 注意: .gitkeepは保持する
+docker/nginx/conf.d/*.conf
+!docker/nginx/conf.d/.gitkeep
+
 # GeoIP設定ファイル（ConfigAgentが自動生成）
 docker/nginx/geoip/*.conf
 !docker/nginx/geoip/.gitkeep

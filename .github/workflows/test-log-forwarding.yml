@@ -74,7 +74,7 @@ jobs:
         working-directory: docker
         run: |
           echo "Starting services..."
-          if ! docker-compose up -d nginx openappsec-agent fluentd 2>&1 | tee /tmp/docker-compose-startup.log; then
+          if ! docker-compose up -d nginx openappsec-agent fluentd redis mock-api config-agent 2>&1 | tee /tmp/docker-compose-startup.log; then
             echo "❌ Failed to start services"
             echo "=== Docker Compose Output ==="
             cat /tmp/docker-compose-startup.log || true
@@ -88,6 +88,14 @@ jobs:
           fi
           echo "✅ Services started successfully"
           echo "Waiting for services to be ready..."
+          
+          # ConfigAgentが設定を生成するまで待機
+          echo "Waiting for ConfigAgent to generate configuration..."
+          sleep 10
+          
+          # ConfigAgentを停止（初回設定生成後は不要）
+          echo "Stopping ConfigAgent..."
+          docker-compose stop config-agent
 
       - name: Remove GeoIP configuration files
         working-directory: docker
