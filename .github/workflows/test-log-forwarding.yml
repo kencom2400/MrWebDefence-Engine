@@ -157,13 +157,32 @@ jobs:
             echo "✅ Nginx started successfully"
             sleep 3
             
+            # Nginxコンテナ内部の実際の設定ファイルを確認
+            echo "=== Nginx container internal configuration check ==="
+            
+            echo "--- Files in /etc/nginx/conf.d/ (inside container) ---"
+            docker-compose exec -T nginx ls -la /etc/nginx/conf.d/ || echo "Failed to list /etc/nginx/conf.d/"
+            
+            echo ""
+            echo "--- Content of /etc/nginx/conf.d/test.example.com.conf (inside container) ---"
+            docker-compose exec -T nginx cat /etc/nginx/conf.d/test.example.com.conf || echo "File not found in container"
+            
+            echo ""
+            echo "--- Full Nginx configuration (nginx -T) ---"
+            docker-compose exec -T nginx nginx -T 2>&1 | head -100 || echo "Failed to get nginx -T output"
+            
+            echo ""
+            echo "--- Checking for GeoIP-related files ---"
+            docker-compose exec -T nginx find /etc/nginx -name "*geoip*" -o -name "*geo_ip*" 2>/dev/null || echo "No GeoIP files found (or find failed)"
+            
             # Nginx設定の構文チェック（起動後）
+            echo ""
             echo "=== Nginx configuration test ==="
-            if docker-compose exec -T nginx nginx -t; then
+            if docker-compose exec -T nginx nginx -t 2>&1; then
               echo "✅ Nginx configuration is valid"
             else
-              echo "⚠️  Warning: Nginx configuration test failed, but container is running"
-              docker-compose logs --tail=30 nginx
+              echo "⚠️  Warning: Nginx configuration test failed"
+              docker-compose logs --tail=50 nginx
             fi
           else
             echo "❌ Failed to start Nginx"
