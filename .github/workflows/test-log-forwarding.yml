@@ -138,6 +138,17 @@ jobs:
           echo "Stopping ConfigAgent..."
           docker-compose stop config-agent
           
+          # Nginx設定をリロード（ConfigAgentが生成した設定を反映）
+          echo "Reloading Nginx to apply generated configuration..."
+          if docker-compose restart nginx; then
+            echo "✅ Nginx restarted successfully"
+            sleep 3
+          else
+            echo "❌ Failed to restart Nginx"
+            docker-compose logs --tail=30 nginx
+            exit 1
+          fi
+          
           echo "=== Final container status ==="
           docker-compose ps
 
