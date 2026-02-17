@@ -26,6 +26,7 @@
 @include .cursor/rules/04-github-integration.d/01-projects-setup.md
 @include .cursor/rules/04-github-integration.d/02-status-management.md
 @include .cursor/rules/04-github-integration.d/03-issue-reporting.md
+@include .cursor/rules/04-github-integration.d/04-github-integration.md
 @include .cursor/rules/04-github-integration.d/04-start-task.md
 @include .cursor/rules/05-ci-cd.d/01-test-scripts.md
 @include .cursor/rules/05-ci-cd.d/02-env-management.md
@@ -33,4 +34,7 @@
 @include .cursor/rules/05-ci-cd.d/05-jira-integration.md
 @include .cursor/rules/templates/issue-report.md
 @include .cursor/rules/templates/pr-description.md
+
+# Repository-specific rules
+@include .cursor/rules/README.md
 
